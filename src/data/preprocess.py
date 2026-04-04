@@ -12,55 +12,56 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 
-def _build_feature_matrix(data, year_idx: int) -> np.ndarray:
-    """Build raw feature matrix for a single timestep.
+def _get_kg_onehot(data, year_idx: int) -> np.ndarray:
+    """Get One-Hot KG Climate Classes for a specific year."""
+    from src.data.koppen_geiger import classify_grid
+    # Ensure raw data is used for classification
+    kg_grid = classify_grid(data["tas_monthly"], data["pr_monthly"])[year_idx].flatten()
+    
+    # One-hot encode (32 classes: 0-31)
+    kg_onehot = np.zeros((len(kg_grid), 32), dtype=np.float32)
+    for i, val in enumerate(kg_grid):
+        if 0 <= val < 32:
+            kg_onehot[i, val] = 1.0
+    return kg_onehot
 
-    Feature layout (11 features):
+
+def _build_feature_matrix(data, year_idx: int) -> np.ndarray:
+    """Build raw feature matrix with One-Hot KG Climate Classes.
+    
+    Feature layout (43 dims):
         [temp, precip, temp_vol, temp_mom, precip_vol, precip_mom,
-         gdp, pop, soil_moisture, coastal_factor, tail_risk_score]
+         gdp, pop, soil_moisture, coastal_factor, tail_risk_score, 
+         ...KG_OneHot(32)]
     """
-    tas = data["tas"]  # (T, nlat, nlon)
+    tas = data["tas"]
     pr = data["pr"]
+
+    kg_onehot = _get_kg_onehot(data, year_idx)
 
     temp = tas[year_idx].flatten()
     precip = pr[year_idx].flatten()
     gdp = data["gdp"].flatten()
-
-    # Population density (if available)
     pop = data.get("pop", np.ones_like(data["gdp"])).flatten()
     pop_norm = pop / (pop.max() + 1e-8)
-
-    # Soil moisture proxy
     soil = data.get("soil_moisture", np.full_like(data["gdp"], 0.3)).flatten()
-
-    # Coastal factor
     coastal = data.get("coastal_factor", np.zeros_like(data["gdp"])).flatten()
 
     from src.tail_risk.volatility import compute_volatility
     from src.tail_risk.momentum import compute_momentum
-
     temp_vol = compute_volatility(tas, window=5, alpha=0.3).flatten()
     temp_mom = compute_momentum(tas, window=3, alpha=0.3).flatten()
     precip_vol = compute_volatility(pr, window=5, alpha=0.3).flatten()
     precip_mom = compute_momentum(pr, window=3, alpha=0.3).flatten()
 
-    # Tail-risk score as a feature (self-referential but useful for GNN propagation)
     from src.tail_risk.engine import get_tail_risk_nodes
     tail_scores, _, _ = get_tail_risk_nodes(data)
 
-    # 11 features
+    # Combine 11 continuous features + 32 categorical features = 43 dims
     feats = np.column_stack([
-        temp,          # 0
-        precip,        # 1
-        temp_vol,      # 2
-        temp_mom,      # 3
-        precip_vol,    # 4
-        precip_mom,    # 5
-        gdp,           # 6
-        pop_norm,      # 7
-        soil,          # 8
-        coastal,       # 9
-        tail_scores,   # 10
+        temp, precip, temp_vol, temp_mom, precip_vol, precip_mom,
+        gdp, pop_norm, soil, coastal, tail_scores,
+        kg_onehot
     ])
     return feats.astype(np.float32)
 
@@ -91,10 +92,11 @@ def build_node_features_raw(data, year_idx=-1):
 
 
 def build_temporal_features_raw(data):
-    """Build raw feature matrices for all timesteps."""
+    """Build raw feature matrices for all timesteps (43 features each)."""
     from src.tail_risk.volatility import compute_volatility_series
     from src.tail_risk.momentum import compute_momentum_series
     from src.tail_risk.engine import get_tail_risk_nodes
+    from src.data.koppen_geiger import classify_grid
 
     tas, pr = data["tas"], data["pr"]
     T, _, _ = tas.shape
@@ -111,8 +113,18 @@ def build_temporal_features_raw(data):
     coastal_flat = data.get("coastal_factor", np.zeros_like(data["gdp"])).flatten()
     tail_scores, _, _ = get_tail_risk_nodes(data)
 
+    # Precompute KG grids for all timesteps
+    kg_grids = classify_grid(data["tas_monthly"], data["pr_monthly"])
+
     features_list = []
     for t in range(T):
+        # Get KG one-hot for this timestep
+        kg_flat = kg_grids[t].flatten()
+        kg_onehot = np.zeros((len(kg_flat), 32), dtype=np.float32)
+        for i, val in enumerate(kg_flat):
+            if 0 <= val < 32:
+                kg_onehot[i, val] = 1.0
+
         feats = np.column_stack([
             tas[t].flatten(),
             pr[t].flatten(),
@@ -125,6 +137,7 @@ def build_temporal_features_raw(data):
             soil_flat,
             coastal_flat,
             tail_scores,
+            kg_onehot
         ])
         features_list.append(feats.astype(np.float32))
 

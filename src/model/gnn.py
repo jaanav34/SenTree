@@ -18,35 +18,55 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, BatchNorm
 
 
+class ClimateConditionedGAT(nn.Module):
+    """
+    Custom GAT layer that uses the Köppen-Geiger categorical prior (32-dim one-hot)
+    to condition the attention scores, acting as a low-pass filter for volatile signals.
+    """
+    def __init__(self, in_channels, out_channels, heads=4, dropout=0.15):
+        super().__init__()
+        self.gat = GATConv(in_channels, out_channels, heads=heads, 
+                           dropout=dropout, concat=False)
+        # Prior conditioning: project KG one-hot to attention scale
+        self.kg_prior = nn.Linear(32, out_channels)
+        self.gate = nn.Parameter(torch.ones(1) * 0.5)
+
+    def forward(self, x, edge_index, kg_onehot):
+        # Base attention scores from all features
+        x_gat = self.gat(x, edge_index)
+        
+        # Categorical anchoring: shift features towards climate-zone centroids
+        prior = self.kg_prior(kg_onehot)
+        
+        # Convex combination of volatile signal and climate prior
+        # This dampens "insane deviations" in the high-frequency volatility features
+        x_conditioned = (1 - self.gate) * x_gat + self.gate * prior
+        return x_conditioned
+
+
 class ClimateRiskGNN(nn.Module):
     """
-    4-layer GAT + GCN hybrid with residual connections.
-
-    Architecture:
-        GATConv(F -> H, heads=4) -> Residual
-        GCNConv(H -> H)         -> Residual
-        GATConv(H -> H, heads=2) -> Residual
-        GCNConv(H -> H)         -> Residual
-        MLP head -> risk_score (N,)
-
-    Also outputs uncertainty estimate when mc_dropout=True.
+    Climate-Conditioned GAT + GCN hybrid.
+    
+    Stabilizes 43-dim input [11 continuous + 32 KG one-hot] by anchoring
+    volatile risk signals to long-term climate regime priors.
     """
 
-    def __init__(self, in_channels=7, hidden_channels=64, out_channels=1,
+    def __init__(self, in_channels=43, hidden_channels=64, out_channels=1,
                  heads=4, dropout=0.15):
         super().__init__()
         self.dropout_rate = dropout
 
-        # Layer 1: Multi-head GAT
-        self.gat1 = GATConv(in_channels, hidden_channels, heads=heads,
-                            dropout=dropout, concat=False)
+        # Layer 1: Climate-Conditioned GAT
+        self.conditioned_gat1 = ClimateConditionedGAT(in_channels, hidden_channels, 
+                                                      heads=heads, dropout=dropout)
         self.bn1 = BatchNorm(hidden_channels)
 
         # Layer 2: GCN for broader spatial aggregation
         self.gcn2 = GCNConv(hidden_channels, hidden_channels)
         self.bn2 = BatchNorm(hidden_channels)
 
-        # Layer 3: GAT with fewer heads for refined attention
+        # Layer 3: Refined GAT
         self.gat3 = GATConv(hidden_channels, hidden_channels, heads=2,
                             dropout=dropout, concat=False)
         self.bn3 = BatchNorm(hidden_channels)
@@ -55,34 +75,33 @@ class ClimateRiskGNN(nn.Module):
         self.gcn4 = GCNConv(hidden_channels, hidden_channels)
         self.bn4 = BatchNorm(hidden_channels)
 
-        # Skip-connection projections (for dimension mismatch in first layer)
+        # Projection for residual connection
         self.skip_proj = nn.Linear(in_channels, hidden_channels)
 
-        # MLP readout head with uncertainty
+        # MLP Readout
         self.head = nn.Sequential(
             nn.Linear(hidden_channels, hidden_channels // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_channels // 2, hidden_channels // 4),
-            nn.ReLU(),
-            nn.Linear(hidden_channels // 4, out_channels),
+            nn.Linear(hidden_channels // 2, out_channels),
         )
 
     def forward(self, data, mc_dropout=False):
+        # Features x: (N, 43), KG one-hot is x[:, -32:]
         x, edge_index = data.x, data.edge_index
+        kg_onehot = x[:, -32:] 
 
-        # If MC dropout requested, keep dropout on during inference
         if mc_dropout:
             self.train()
 
-        # Layer 1: GAT + residual
+        # Layer 1: Conditioned Attention + Residual
         skip = self.skip_proj(x)
-        x = self.gat1(x, edge_index)
+        x = self.conditioned_gat1(x, edge_index, kg_onehot)
         x = self.bn1(x)
         x = F.elu(x)
-        x = x + skip  # residual
+        x = x + skip
 
-        # Layer 2: GCN + residual
+        # Layer 2: GCN + Residual
         skip = x
         x = self.gcn2(x, edge_index)
         x = self.bn2(x)
@@ -90,19 +109,18 @@ class ClimateRiskGNN(nn.Module):
         x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = x + skip
 
-        # Layer 3: GAT + residual
+        # Layer 3: GAT
         skip = x
         x = self.gat3(x, edge_index)
         x = self.bn3(x)
         x = F.elu(x)
         x = x + skip
 
-        # Layer 4: GCN + residual
+        # Layer 4: GCN
         skip = x
         x = self.gcn4(x, edge_index)
         x = self.bn4(x)
         x = F.elu(x)
-        x = F.dropout(x, p=self.dropout_rate, training=self.training)
         x = x + skip
 
         # Readout

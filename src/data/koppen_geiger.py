@@ -1,18 +1,12 @@
 """
-Köppen-Geiger Climate Classification Engine.
+Köppen-Geiger Climate Classification Engine (Corrected).
 
-Implements the standard Köppen-Geiger classification rules:
-  - Group A: Tropical
-  - Group B: Dry
-  - Group C: Temperate
-  - Group D: Continental
-  - Group E: Polar
-
-Based on the Wikipedia specification: https://en.wikipedia.org/wiki/Köppen_climate_classification
+Stabilizes GNN risk scores by providing categorical climate priors.
+Handles Kelvin -> Celsius and daily flux -> monthly/annual total precipitation.
 """
 import numpy as np
 
-# Numerical mapping for the classifications
+# Numerical mapping for the classifications (0-31)
 KG_MAP = {
     'Af': 1, 'Am': 2, 'Aw': 3, 'As': 4,
     'BWh': 5, 'BWk': 6, 'BSh': 7, 'BSk': 8,
@@ -23,140 +17,96 @@ KG_MAP = {
 }
 
 KG_LABELS = {v: k for k, v in KG_MAP.items()}
+DAYS_IN_MONTH = np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
 
-def classify_koppen_geiger(temp_monthly, precip_monthly):
+def classify_koppen_geiger(temp_monthly, precip_monthly, is_kelvin=True, is_daily_flux=True):
     """
-    Classify a single grid cell into a Köppen-Geiger climate zone.
+    Classify a grid cell using standard KG rules with proper unit scaling.
     
     Args:
-        temp_monthly: (12,) Monthly average temperature in °C.
-        precip_monthly: (12,) Monthly average precipitation in mm.
-        
-    Returns:
-        KG_Code: string (e.g., 'Af', 'Cfa')
-        KG_Value: int (numerical index for mapping)
+        temp_monthly: (12,) Monthly temperatures.
+        precip_monthly: (12,) Monthly precipitation values.
+        is_kelvin: If True, converts K -> C.
+        is_daily_flux: If True, scales mm/day or kg/m2/s to monthly totals.
     """
-    T_ann = np.mean(temp_monthly)
-    P_ann = np.sum(precip_monthly)
+    # 1. Unit Conversion
+    t = np.array(temp_monthly)
+    if is_kelvin and np.mean(t) > 200:
+        t = t - 273.15
+        
+    p = np.array(precip_monthly)
+    if is_daily_flux:
+        # Scale daily mean (mm/day) to monthly totals (mm)
+        p = p * DAYS_IN_MONTH
+        
+    T_ann = np.mean(t)
+    P_ann = np.sum(p)
+    T_max = np.max(t)
+    T_min = np.min(t)
     
-    T_max = np.max(temp_monthly)
-    T_min = np.min(temp_monthly)
+    # 2. Determine Seasonality for Group B threshold (P_thresh)
+    # Summer: Apr-Sep (NH)
+    P_summer = np.sum(p[3:9])
+    P_winter = P_ann - P_summer
     
-    # Determine seasonality for Group B
-    # 70% or more of P_ann falls in summer half of year
-    # Summer: Apr-Sep (NH) or Oct-Mar (SH). For simplification, we check both.
-    P_summer_nh = np.sum(precip_monthly[3:9])
-    P_summer_sh = np.sum(precip_monthly[[9, 10, 11, 0, 1, 2]])
-    
-    if P_summer_nh / (P_ann + 1e-8) >= 0.7:
+    if P_summer / (P_ann + 1e-8) >= 0.7:
         P_thresh = 2 * T_ann + 28
-    elif P_summer_sh / (P_ann + 1e-8) >= 0.7:
-        P_thresh = 2 * T_ann + 28
-    elif np.sum(precip_monthly[[0,1,2,9,10,11]]) / (P_ann + 1e-8) >= 0.7: # Winter-wet
+    elif P_winter / (P_ann + 1e-8) >= 0.7:
         P_thresh = 2 * T_ann
     else:
         P_thresh = 2 * T_ann + 14
         
     # --- Group B (Dry) ---
     if P_ann < 10 * P_thresh:
-        if P_ann < 5 * P_thresh:
-            group = 'BW'
-        else:
-            group = 'BS'
-        
-        if T_ann >= 18:
-            code = group + 'h'
-        else:
-            code = group + 'k'
+        group = 'BW' if P_ann < 5 * P_thresh else 'BS'
+        code = group + ('h' if T_ann >= 18 else 'k')
         return code, KG_MAP.get(code, 0)
 
     # --- Group E (Polar) ---
     if T_max < 10:
-        if T_max > 0:
-            code = 'ET'
-        else:
-            code = 'EF'
+        code = 'EF' if T_max <= 0 else 'ET'
         return code, KG_MAP.get(code, 0)
 
     # --- Group A (Tropical) ---
     if T_min >= 18:
-        P_min = np.min(precip_monthly)
+        P_min = np.min(p)
         if P_min >= 60:
             code = 'Af'
         else:
-            # Check for Monsoon or Savanna
             if P_min >= 100 - (P_ann / 25):
                 code = 'Am'
             else:
-                # Aw or As (Winter dry vs Summer dry)
-                if P_summer_nh < P_summer_sh: # NH Winter Dry
-                    code = 'Aw'
-                else:
-                    code = 'As'
+                code = 'Aw' if P_summer < P_winter else 'As'
         return code, KG_MAP.get(code, 0)
 
-    # --- Group C (Temperate) and D (Continental) ---
-    # T_min between -3 (or 0) and 18 -> Group C
-    # T_min <= -3 (or 0) -> Group D
-    # We use 0°C as the threshold for D (modern standard)
-    if T_min > 0:
-        group = 'C'
-    else:
-        group = 'D'
-        
-    # Precipitation sub-type
-    # f: no dry season
-    # s: dry summer
-    # w: dry winter
-    P_s_min = np.min(precip_monthly[3:9]) # Summer (NH proxy)
-    P_s_max = np.max(precip_monthly[3:9])
-    P_w_min = np.min(precip_monthly[[9, 10, 11, 0, 1, 2]]) # Winter (NH proxy)
-    P_w_max = np.max(precip_monthly[[9, 10, 11, 0, 1, 2]])
+    # --- Group C (Temperate) & D (Continental) ---
+    group = 'C' if T_min > 0 else 'D'
     
-    if P_s_min < 40 and P_s_min < P_w_max / 3:
-        precip_sub = 's'
-    elif P_w_min < P_s_max / 10:
-        precip_sub = 'w'
-    else:
-        precip_sub = 'f'
-        
-    # Temperature sub-type
-    # a: hot summer (T_max >= 22)
-    # b: warm summer (T_max < 22, at least 4 months > 10)
-    # c: cool summer (1-3 months > 10)
-    # d: extremely continental (Group D only, T_min < -38)
-    months_above_10 = np.sum(temp_monthly > 10)
+    # Sub-types
+    P_s_min, P_s_max = np.min(p[3:9]), np.max(p[3:9])
+    P_w_min, P_w_max = np.min(p[[0,1,2,9,10,11]]), np.max(p[[0,1,2,9,10,11]])
     
-    if T_max >= 22:
-        temp_sub = 'a'
-    elif months_above_10 >= 4:
-        temp_sub = 'b'
-    elif group == 'D' and T_min < -38:
-        temp_sub = 'd'
-    else:
-        temp_sub = 'c'
+    if P_s_min < 40 and P_s_min < P_w_max / 3: precip_sub = 's'
+    elif P_w_min < P_s_max / 10: precip_sub = 'w'
+    else: precip_sub = 'f'
+        
+    months_above_10 = np.sum(t > 10)
+    if T_max >= 22: temp_sub = 'a'
+    elif months_above_10 >= 4: temp_sub = 'b'
+    elif group == 'D' and T_min < -38: temp_sub = 'd'
+    else: temp_sub = 'c'
         
     code = group + precip_sub + temp_sub
     return code, KG_MAP.get(code, 0)
 
-def classify_grid(temp_3d, precip_3d):
-    """
-    Classify an entire grid over a multi-year period (returning classification per year).
-    
-    Args:
-        temp_3d: (T, 12, nlat, nlon) monthly data
-        precip_3d: (T, 12, nlat, nlon) monthly data
-        
-    Returns:
-        kg_codes: (T, nlat, nlon) numerical KG values
-    """
-    T, _, nlat, nlon = temp_3d.shape
-    kg_results = np.zeros((T, nlat, nlon), dtype=np.int32)
-    
+def classify_grid(tas_monthly, pr_monthly, is_kelvin=True, is_daily_flux=True):
+    """Returns (T, nlat, nlon) numerical KG codes."""
+    T, M, nlat, nlon = tas_monthly.shape
+    results = np.zeros((T, nlat, nlon), dtype=np.int32)
     for t in range(T):
         for i in range(nlat):
             for j in range(nlon):
-                _, val = classify_koppen_geiger(temp_3d[t, :, i, j], precip_3d[t, :, i, j])
-                kg_results[t, i, j] = val
-                
-    return kg_results
+                _, val = classify_koppen_geiger(tas_monthly[t, :, i, j], pr_monthly[t, :, i, j], 
+                                                is_kelvin, is_daily_flux)
+                results[t, i, j] = val
+    return results

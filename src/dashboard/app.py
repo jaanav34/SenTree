@@ -19,6 +19,7 @@ st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wi
 
 _WORLD_LON_SPAN_DEG = 360.0
 _WORLD_LAT_SPAN_DEG = 180.0
+_WEB_MERCATOR_MAX_LAT = 85.05112878
 
 
 def _show_video(path_or_url: str) -> None:
@@ -228,6 +229,11 @@ def _opportunity_points(opportunity):
         "nearest_km": nearest_km.astype(float),
     })
     df["color"] = colors.tolist()
+
+    # WebMercator (deck.gl basemaps) only supports latitudes up to about ±85.051°.
+    # Global ISIMIP grids often include points up to ~±89°, which will render "off-map"
+    # in the void. Filter those points for the interactive basemap view.
+    df = df[np.abs(df["lat"]) <= _WEB_MERCATOR_MAX_LAT].reset_index(drop=True)
     return df, (vmin, vmax)
 
 # --- Search Results ---

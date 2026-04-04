@@ -197,11 +197,6 @@ for key in INTERVENTIONS:
         f'outputs/videos/comparison_{key}.mp4',
         intervention_name=name
     )
-    render_risk_video(
-        intervention_risk_series[key], data['lats'], data['lons'],
-        f'outputs/videos/{key}_risk.mp4',
-        title=f'Risk with {name}'
-    )
 
 print("\n" + "=" * 60)
 print("Pipeline complete!")

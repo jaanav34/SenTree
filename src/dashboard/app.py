@@ -146,6 +146,90 @@ if os.path.exists(video_dir):
 else:
     st.info('Output directory not found. Run the pipeline first.')
 
+# --- Math & Methodology Tab ---
+st.divider()
+st.header('Technical Deep-Dive: Math & Methodology')
+
+math_tab, playground_tab = st.tabs(['📐 Mathematical Foundations', '🎮 Interactive Playground'])
+
+with math_tab:
+    st.subheader('1. Tail-Risk Escalation (Gurjar & Camp 2026)')
+    st.markdown("""
+    The tail-risk engine identifies nodes where climate volatility and momentum intersect to create "regime shifts."
+    
+    **A. EWMA Smoothing (Intensity):**
+    First, raw signals $X(t)$ (temperature/precipitation) are smoothed to suppress high-frequency noise:
+    $$\lambda(t) = \\alpha X(t) + (1 - \\alpha)\lambda(t-1)$$
+    where $\\alpha = 0.3$ is the decay factor.
+    
+    **B. Standardized Momentum:**
+    Momentum captures the acceleration of the climate signal, standardized by local rolling volatility:
+    $$m(t) = \\frac{\lambda(t) - \lambda(t-1)}{\sigma_w(t) + \\epsilon}$$
+    where $\sigma_w(t)$ is the rolling standard deviation over window $w$.
+    
+    **C. Rolling Volatility:**
+    Volatility measures the stability of the signal:
+    $$v(t) = \\sqrt{\\frac{1}{w} \sum_{i=t-w+1}^{t} [m(i) - \\bar{m}_w]^2}$$
+    
+    **D. Hawkes Self-Excitation:**
+    To capture "clusters" of extreme events, we add a Hawkes process intensity:
+    $$\lambda^*(t) = \mu + \sum_{t_i < t} \\beta e^{-\gamma(t - t_i)}$$
+    Nodes exceeding the 95th percentile of the composite score are flagged as **Tail-Risk Escalation** zones.
+    """)
+    
+    st.subheader('2. Resilience ROI & Economic Exposure (Ito 2020)')
+    st.markdown("""
+    **Avoided Damage Potential (The "Green Shades"):**
+    The green shades on our map represent the **Resilience Opportunity Index (ROI)**, which is the potential damage avoided by an intervention.
+    
+    **A. Loss Proxy ($L$):**
+    Loss is modeled as the intersection of climate risk ($R$), GDP ($G$), and Population ($P$):
+    $$L_{node} = R_{score} \\times (G_{norm} \\times P_{norm}) \\times S$$
+    where $S$ is a regional scaling factor.
+    
+    **B. Resilience ROI:**
+    The return is the sum of discounted avoided losses over a 10-year horizon:
+    $$ROI_{resilience} = \\frac{\sum_{t=1}^{10} (L_{baseline} - L_{intervention}) \\times (1+r)^{-t}}{Cost}$$
+    where $r$ is the discount rate (default 5%).
+    
+    **C. Multi-Source Uncertainty:**
+    Following **Ito et al. (2020)**, we compute uncertainty via quadrature:
+    $$U_{total} = \\sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}$$
+    """)
+
+    st.subheader('3. GNN Risk Architecture')
+    st.markdown("""
+    Our GNN uses a **Graph Attention Network (GAT)** to propagate risk through geographic and economic links:
+    $$h_i^{(l+1)} = \\sigma\left( \sum_{j \in \\mathcal{N}(i)} \\alpha_{ij} \mathbf{W} h_j^{(l)} \\right)$$
+    where attention $\\alpha_{ij}$ is computed based on distance and feature similarity.
+    """)
+
+with playground_tab:
+    st.subheader('Risk Simulation Playground')
+    st.markdown('Adjust parameters to see how they impact the ROI calculation logic.')
+    
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        p_alpha = st.slider('EWMA Decay ($\\alpha$)', 0.05, 0.95, 0.30)
+        p_discount = st.slider('Discount Rate ($r$)', 0.01, 0.15, 0.05)
+    with col_p2:
+        p_exposure = st.slider('Economic Exposure Scaling', 0.5, 5.0, 1.0)
+        p_threshold = st.slider('Tail-Risk Percentile', 80, 99, 95)
+    
+    # Mock calculation for playground
+    base_val = 100.0
+    reduction = 15.0 * p_exposure
+    discounted_val = sum([reduction / (1 + p_discount)**t for t in range(10)])
+    
+    st.info(f"**Theoretical Outcome:** An intervention reducing risk by {reduction:.1f}% would yield a total discounted loss avoidance of **${discounted_val:.2f}B** over 10 years.")
+    
+    st.markdown("""
+    **Statistical Implications:**
+    *   **Higher $\\alpha$:** Makes the system more sensitive to recent shocks (higher volatility).
+    *   **Lower $r$:** Increases the present value of future resilience (favoring long-term projects like Mangroves).
+    *   **Higher Threshold:** Focuses only on the most extreme "black swan" events.
+    """)
+
 # --- Quantitative Risk Chart ---
 st.subheader("Risk Over Time")
 ts = load_risk_timeseries()

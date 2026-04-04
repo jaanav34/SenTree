@@ -4,18 +4,19 @@ import torch
 from torch_geometric.data import Data
 
 
-def apply_intervention(features, positions, intervention, lons):
+def apply_intervention(features, positions, intervention, lons, *, scaler=None):
     """
     Apply intervention deltas to feature matrix.
 
     Args:
-        features: (N, 5) numpy array — [temp, precip, volatility, momentum, gdp]
+        features: (N, F) numpy array — raw features from preprocess
         positions: (N, 2) numpy array — [lat, lon]
         intervention: dict from interventions.py
         lons: original lon values for coastal detection
+        scaler: optional StandardScaler; if provided, returns scaled features
 
     Returns:
-        modified_features: (N, 5)
+        modified_features: (N, F)
     """
     modified = features.copy()
     deltas = intervention['deltas']
@@ -26,22 +27,42 @@ def apply_intervention(features, positions, intervention, lons):
     else:
         mask = np.ones(len(features), dtype=bool)
 
-    # Temp reduction (feature index 0)
+    # Feature layout (see src.data.preprocess):
+    # [temp, precip, temp_vol, temp_mom, precip_vol, precip_mom, gdp]
+
+    # Temp reduction (feature index 0) — degrees C
     temp_delta = deltas.get('temp_reduction', 0)
-    modified[mask, 0] -= temp_delta * 0.5
+    modified[mask, 0] -= temp_delta
 
-    # Volatility reduction (feature index 2)
+    # Optional precip reduction (feature index 1) — mm/day (synthetic/demo)
+    precip_delta = deltas.get("precip_reduction", 0)
+    modified[mask, 1] -= precip_delta
+
+    # Precip volatility reduction (feature index 4)
     vol_reduction = deltas.get('precip_volatility_reduction', 0)
-    modified[mask, 2] *= (1 - vol_reduction)
+    modified[mask, 4] *= (1 - vol_reduction)
 
-    # GDP boost (feature index 4)
+    # Optional temp volatility reduction (feature index 2)
+    temp_vol_reduction = deltas.get("temp_volatility_reduction", 0)
+    modified[mask, 2] *= (1 - temp_vol_reduction)
+
+    # Optional precip momentum reduction (feature index 5)
+    precip_mom_reduction = deltas.get("precip_momentum_reduction", 0)
+    modified[mask, 5] *= (1 - precip_mom_reduction)
+
+    # GDP boost (feature index 6)
     gdp_factor = deltas.get('gdp_boost_factor', 1.0)
-    modified[mask, 4] *= gdp_factor
+    modified[mask, 6] *= gdp_factor
 
-    return modified
+    if scaler is not None:
+        return scaler.transform(modified).astype(np.float32)
+
+    return modified.astype(np.float32)
 
 
-def run_all_simulations(model, base_data, features, positions, interventions_dict, lons):
+def run_all_simulations(
+    model, base_data, features_raw, positions, interventions_dict, lons, *, scaler=None
+):
     """Run all interventions, return results dict."""
     from src.model.gnn import predict
 
@@ -49,7 +70,9 @@ def run_all_simulations(model, base_data, features, positions, interventions_dic
     results = {}
 
     for key, intervention in interventions_dict.items():
-        mod_features = apply_intervention(features, positions, intervention, lons)
+        mod_features = apply_intervention(
+            features_raw, positions, intervention, lons, scaler=scaler
+        )
         mod_data = Data(
             x=torch.tensor(mod_features, dtype=torch.float32),
             edge_index=base_data.edge_index,

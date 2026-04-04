@@ -68,6 +68,15 @@ def load_roi_data():
 
 roi_data = load_roi_data()
 
+
+@st.cache_data
+def load_risk_timeseries():
+    path = "outputs/roi/risk_timeseries.json"
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return None
+
 # --- Search Results ---
 if search_btn and query:
     st.subheader('Search Results')
@@ -136,6 +145,23 @@ if os.path.exists(video_dir):
         st.info('No videos generated yet. Run `python scripts/run_pipeline.py`.')
 else:
     st.info('Output directory not found. Run the pipeline first.')
+
+# --- Quantitative Risk Chart ---
+st.subheader("Risk Over Time")
+ts = load_risk_timeseries()
+if ts is None:
+    st.info("Risk time series not found yet. Re-run the pipeline to generate `outputs/roi/risk_timeseries.json`.")
+else:
+    metric = st.selectbox("Metric", ["mean", "p95", "max"], index=0)
+    years = ts["years"]
+    chart = {"Year": years}
+    chart["Baseline"] = ts["baseline"][metric]
+    if "mangrove_restoration" in ts:
+        chart["Mangrove Restoration"] = ts["mangrove_restoration"][metric]
+    if "regenerative_agriculture" in ts:
+        chart["Regenerative Agriculture"] = ts["regenerative_agriculture"][metric]
+    df = pd.DataFrame(chart).set_index("Year")
+    st.line_chart(df)
 
 # --- Tail Risk Map ---
 st.subheader('Tail-Risk Escalation Map')

@@ -149,6 +149,11 @@ Invoke-Checked $venvPython "-m" "pip" "install" "--upgrade" "pip"
 Write-Host "Installing requirements.txt (venv-only)..."
 Invoke-Checked $venvPython "-m" "pip" "install" "--require-virtualenv" "-r" "requirements.txt"
 
+# System dependency: ffmpeg (required to render MP4s)
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -and -not $env:SENTREE_FFMPEG_PATH -and -not $env:SENTREE_FFMPEG) {
+  Write-Warning "ffmpeg not found on PATH. MP4 rendering will fail until you install it. Try: winget install Gyan.FFmpeg"
+}
+
 # PyG CPU extras install (best-effort)
 Write-Host "Installing PyG CPU extras (best-effort)..."
 try {

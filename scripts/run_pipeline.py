@@ -12,7 +12,12 @@ ensure_venv()
 import numpy as np
 
 from src.data.load_isimip import load_climate_data
-from src.data.preprocess import build_node_features, build_temporal_features
+from src.data.preprocess import (
+    build_node_features,
+    build_node_features_raw,
+    build_temporal_features,
+    build_temporal_features_raw,
+)
 from src.tail_risk.engine import compute_tail_risk, get_tail_risk_nodes
 from src.graph.build_graph import build_climate_graph
 from src.model.gnn import ClimateRiskGNN, train_gnn, predict
@@ -42,6 +47,7 @@ print(f"  Flagged nodes: {flags.sum()} / {flags.size}")
 # 3. Build features + graph
 print("\n[3/7] Building graph...")
 features, positions, scaler = build_node_features(data, year_idx=-1)
+features_raw, _positions_raw = build_node_features_raw(data, year_idx=-1)
 graph_data = build_climate_graph(features, positions, k=8)
 print(f"  Nodes: {graph_data.num_nodes}, Edges: {graph_data.edge_index.shape[1]}")
 
@@ -55,7 +61,7 @@ model = train_gnn(model, graph_data, tail_scores_flat, epochs=50)
 print("\n[5/7] Running simulations...")
 lons = data['lons']
 baseline_risk, sim_results = run_all_simulations(
-    model, graph_data, features, positions, INTERVENTIONS, lons
+    model, graph_data, features_raw, positions, INTERVENTIONS, lons, scaler=scaler
 )
 
 # 6. Compute ROI
@@ -87,7 +93,8 @@ print("\n[7/7] Rendering videos...")
 nlat, nlon = data['tas'].shape[1], data['tas'].shape[2]
 T = data['tas'].shape[0]
 
-temporal_features = build_temporal_features(data)
+temporal_features_raw = build_temporal_features_raw(data)
+temporal_features = build_temporal_features(data, scaler=scaler)
 baseline_risk_series = []
 intervention_risk_series = {key: [] for key in INTERVENTIONS}
 
@@ -96,6 +103,7 @@ from torch_geometric.data import Data as PyGData
 
 for t in range(T):
     feats = temporal_features[t]
+    feats_raw = temporal_features_raw[t]
     temp_data = PyGData(
         x=torch.tensor(feats, dtype=torch.float32),
         edge_index=graph_data.edge_index,
@@ -106,7 +114,7 @@ for t in range(T):
     baseline_risk_series.append(b_risk.reshape(nlat, nlon))
 
     for key, interv in INTERVENTIONS.items():
-        mod_feats = apply_intervention(feats, positions, interv, lons)
+        mod_feats = apply_intervention(feats_raw, positions, interv, lons, scaler=scaler)
         mod_data = PyGData(
             x=torch.tensor(mod_feats, dtype=torch.float32),
             edge_index=graph_data.edge_index,
@@ -115,6 +123,23 @@ for t in range(T):
         )
         i_risk = predict(model, mod_data)
         intervention_risk_series[key].append(i_risk.reshape(nlat, nlon))
+
+# Save quantitative time-series metrics (for debugging / analysis)
+def _series_stats(series_2d):
+    return {
+        "mean": [float(x.mean()) for x in series_2d],
+        "p95": [float(np.percentile(x, 95)) for x in series_2d],
+        "max": [float(x.max()) for x in series_2d],
+    }
+
+years = [int(y) for y in range(2015, 2015 + T)]
+risk_timeseries = {"years": years, "baseline": _series_stats(baseline_risk_series)}
+for key in INTERVENTIONS:
+    risk_timeseries[key] = _series_stats(intervention_risk_series[key])
+
+os.makedirs("outputs/roi", exist_ok=True)
+with open("outputs/roi/risk_timeseries.json", "w") as f:
+    json.dump(risk_timeseries, f, indent=2)
 
 # Tail-risk flags per timestep
 from src.tail_risk.volatility import compute_volatility_series

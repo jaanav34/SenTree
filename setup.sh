@@ -31,6 +31,11 @@ fi
 "$VENV_PY" -m pip install --upgrade pip
 "$VENV_PY" -m pip install --require-virtualenv -r requirements.txt
 
+# System dependency: ffmpeg (required to render MP4s)
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "WARNING: ffmpeg not found on PATH. MP4 rendering will fail until you install it." 1>&2
+fi
+
 # PyG CPU install (safe for hackathon)
 "$VENV_PY" -m pip install --require-virtualenv --only-binary=:all: torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.1.0+cpu.html 2>/dev/null || echo "PyG extras install failed - GCNConv may still work without them"
 

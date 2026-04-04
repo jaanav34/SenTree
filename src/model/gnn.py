@@ -242,6 +242,9 @@ class ClimateRiskGNN(nn.Module):
 # KG Regime Contrastive Loss
 # ---------------------------------------------------------------------------
 
+_KG_VULN_TENSOR = _build_kg_vulnerability_tensor(32)
+
+
 def kg_regime_loss(pred: torch.Tensor, kg_onehot: torch.Tensor,
                    features: torch.Tensor, temp_idx: int = 0,
                    weight: float = 0.05) -> torch.Tensor:
@@ -269,7 +272,8 @@ def kg_regime_loss(pred: torch.Tensor, kg_onehot: torch.Tensor,
     idx_i = torch.randint(0, N, (n_pairs,), device=pred.device)
     idx_j = torch.randint(0, N, (n_pairs,), device=pred.device)
 
-    temp_tol = temp.std() * 0.5
+    # Added small epsilon to std to handle constant temp (synthetic data)
+    temp_tol = temp.std() * 0.5 + 1e-6
     diff_kg   = (kg_class[idx_i] != kg_class[idx_j])
     similar_t = (temp[idx_i] - temp[idx_j]).abs() < temp_tol
     valid = diff_kg & similar_t
@@ -279,11 +283,9 @@ def kg_regime_loss(pred: torch.Tensor, kg_onehot: torch.Tensor,
 
     i_v, j_v = idx_i[valid], idx_j[valid]
 
-    vuln = torch.tensor(
-        [_KG_VULNERABILITY.get(int(c), 0.5) for c in kg_class.cpu().numpy()],
-        device=pred.device, dtype=torch.float32,
-    )
-    margin = (vuln[i_v] - vuln[j_v]).abs().clamp(min=0.05)
+    # Optimized: use pre-computed tensor instead of Python loop
+    vuln = _KG_VULN_TENSOR.to(pred.device)
+    margin = (vuln[kg_class[i_v]] - vuln[kg_class[j_v]]).abs().clamp(min=0.05)
     risk_diff = (pred[i_v] - pred[j_v]).abs()
 
     return weight * F.relu(margin - risk_diff).mean()
@@ -294,9 +296,13 @@ def kg_regime_loss(pred: torch.Tensor, kg_onehot: torch.Tensor,
 # ---------------------------------------------------------------------------
 
 def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
-              weight_decay=1e-4, schedule=True, kg_loss_weight=0.05):
+              weight_decay=1e-4, schedule=True, kg_loss_weight=0.05,
+              return_history=False):
     """
     AdamW + cosine annealing + label smoothing + KG regime contrastive loss.
+
+    Args:
+        return_history: if True, returns (model, history_dict)
     """
     device = _get_default_device()
     model = model.to(device)
@@ -310,24 +316,41 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
             optimizer, T_max=epochs, eta_min=lr * 0.01
         )
 
-    target = torch.tensor(target_scores, dtype=torch.float32, device=device)
-    target = (target - target.min()) / (target.max() - target.min() + 1e-8)
+    # Move target to device and normalize to [0, 1] for Sigmoid readout
+    if not isinstance(target_scores, torch.Tensor):
+        target = torch.tensor(target_scores, dtype=torch.float32, device=device)
+    else:
+        target = target_scores.to(device, dtype=torch.float32)
+
+    # Min-max scaling with label smoothing
+    t_min, t_max = target.min(), target.max()
+    target = (target - t_min) / (t_max - t_min + 1e-8)
     target = target * 0.95 + 0.025
 
     loss_fn = nn.HuberLoss(delta=0.5)
-    best_loss = float('inf')
+    history = {
+        "loss": [],
+        "learning_rate": [],
+        "target": target.detach().cpu().numpy(),
+        "predictions": [],
+        "positions": data.pos.detach().cpu().numpy() if hasattr(data, 'pos') else None,
+        "edge_index_sample": data.edge_index.detach().cpu().numpy()
+    }
 
     model.train()
     for epoch in range(epochs):
         optimizer.zero_grad()
         pred = model(data)
 
+        # 1. Main Huber Loss
         loss = loss_fn(pred, target)
 
+        # 2. Smoothness Regularization (edges should have similar risk)
         if data.edge_index.shape[1] > 0:
             src, dst = data.edge_index[0], data.edge_index[1]
             loss = loss + 0.01 * torch.mean((pred[src] - pred[dst]) ** 2)
 
+        # 3. KG Regime Contrastive Loss
         kg_onehot = data.x[:, -32:]
         loss = loss + kg_regime_loss(pred, kg_onehot, data.x,
                                      weight=kg_loss_weight)
@@ -335,16 +358,24 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+
+        lrs = [pg['lr'] for pg in optimizer.param_groups]
+        history["loss"].append(loss.item())
+        history["learning_rate"].append(lrs[0])
+        history["predictions"].append(pred.detach().cpu().numpy())
+
         if scheduler:
             scheduler.step()
 
         if (epoch + 1) % 10 == 0:
             print(f"  Epoch {epoch+1}/{epochs}, Loss: {loss.item():.6f}, "
-                  f"LR: {optimizer.param_groups[0]['lr']:.6f}")
+                  f"LR: {lrs[0]:.6f}")
 
-        if loss.item() < best_loss - 1e-6:
-            best_loss = loss.item()
+    # Final predictions as stacked numpy array (epochs, nodes)
+    history["predictions"] = np.stack(history["predictions"], axis=0)
 
+    if return_history:
+        return model, history
     return model
 
 

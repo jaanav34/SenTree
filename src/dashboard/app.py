@@ -311,11 +311,11 @@ st.markdown(
         box-shadow: 0 12px 28px rgba(8, 18, 22, 0.18);
     }
 
-    section[data-testid="stSidebar"] .sentree-card h3 {
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] .sentree-card h3 {
         color: #17342f !important;
     }
 
-    section[data-testid="stSidebar"] .sentree-card p {
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] .sentree-card p {
         color: #49615a !important;
     }
 
@@ -449,19 +449,6 @@ with st.sidebar:
     st.divider()
     surface_card("Deployment Region", "SE Asia coastal network with tail-risk emphasis on dense coastal and agricultural nodes.")
     surface_card("Forecast Horizon", "2015-2100 scenario window with intervention comparisons and searchable video outputs.")
-    st.markdown('**Region:** SE Asia Coastal')
-    st.markdown('**Time:** 2015-2100')
-
-# --- Search ---
-col1, col2 = st.columns([3, 1])
-with col1:
-    query = st.text_input(
-        'Search simulations',
-        placeholder='e.g., "Show where mangroves prevent collapse"',
-        key='search_query'
-    )
-with col2:
-    search_btn = st.button('Search', type='primary', width='stretch')
 
 # --- Load results ---
 @st.cache_data

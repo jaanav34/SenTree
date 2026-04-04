@@ -17,6 +17,9 @@ import numpy as np
 
 st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
 
+_WORLD_LON_SPAN_DEG = 360.0
+_WORLD_LAT_SPAN_DEG = 180.0
+
 
 def _show_video(path_or_url: str) -> None:
     """Render a video from a local path (cluster filesystem) or a URL."""
@@ -49,7 +52,7 @@ with col1:
         key='search_query'
     )
 with col2:
-    search_btn = st.button('Search', type='primary', use_container_width=True)
+    search_btn = st.button('Search', type='primary', width='stretch')
 
 # --- Load results ---
 @st.cache_data
@@ -123,6 +126,36 @@ def _wrap_lon_180(lon):
     lon = np.where(lon > 180.0, lon - 360.0, lon)
     lon = np.where(lon < -180.0, lon + 360.0, lon)
     return lon
+
+
+def _suggest_pydeck_zoom(lat_span_deg: float, lon_span_deg: float) -> float:
+    """Heuristic zoom so the bbox roughly fits (works for SE Asia and global)."""
+    lat_span_deg = float(lat_span_deg) if lat_span_deg is not None else 0.0
+    lon_span_deg = float(lon_span_deg) if lon_span_deg is not None else 0.0
+
+    lat_span_deg = max(lat_span_deg, 1e-6)
+    lon_span_deg = max(lon_span_deg, 1e-6)
+
+    zoom_lon = np.log2(_WORLD_LON_SPAN_DEG / lon_span_deg) + 1.0
+    zoom_lat = np.log2(_WORLD_LAT_SPAN_DEG / lat_span_deg) + 1.0
+    zoom = float(min(zoom_lon, zoom_lat))
+    return float(np.clip(zoom, 0.5, 6.0))
+
+
+def _approx_cell_size_m(lats: np.ndarray, lons: np.ndarray) -> int:
+    """Approximate meters per grid step (used for pydeck cell sizing)."""
+    lats = np.asarray(lats, dtype=np.float64)
+    lons = np.asarray(lons, dtype=np.float64)
+    if lats.size < 2 or lons.size < 2:
+        return 55_000
+
+    dlat = np.nanmedian(np.abs(np.diff(lats)))
+    dlon = np.nanmedian(np.abs(np.diff(lons)))
+    step_deg = float(np.nanmax([dlat, dlon]))
+
+    # 1° latitude ~= 111 km (good enough for UI sizing)
+    cell = int(round(111_000.0 * step_deg))
+    return int(np.clip(cell, 20_000, 350_000))
 
 
 @st.cache_data
@@ -274,7 +307,7 @@ math_tab, playground_tab = st.tabs(['📐 Mathematical Foundations', '🎮 Inter
 
 with math_tab:
     st.subheader('1. Tail-Risk Escalation (Gurjar & Camp 2026)')
-    st.markdown("""
+    st.markdown(r"""
     The tail-risk engine identifies nodes where climate volatility and momentum intersect to create "regime shifts."
     
     **A. EWMA Smoothing (Intensity):**
@@ -298,7 +331,7 @@ with math_tab:
     """)
     
     st.subheader('2. Resilience ROI & Economic Exposure (Ito 2020)')
-    st.markdown("""
+    st.markdown(r"""
     **Avoided Damage Potential (The "Green Shades"):**
     The green shades on our map represent the **Resilience Opportunity Index (ROI)**, which is the potential damage avoided by an intervention.
     
@@ -318,7 +351,7 @@ with math_tab:
     """)
 
     st.subheader('3. GNN Risk Architecture')
-    st.markdown("""
+    st.markdown(r"""
     Our GNN uses a **Graph Attention Network (GAT)** to propagate risk through geographic and economic links:
     $$h_i^{(l+1)} = \\sigma\left( \sum_{j \in \\mathcal{N}(i)} \\alpha_{ij} \mathbf{W} h_j^{(l)} \\right)$$
     where attention $\\alpha_{ij}$ is computed based on distance and feature similarity.
@@ -379,20 +412,41 @@ if opportunity is not None:
 
         df_pts, (vmin, vmax) = _opportunity_points(opportunity)
 
+        with st.expander("Map debug (lat/lon ranges)"):
+            lats_dbg = np.asarray(opportunity["lats"], dtype=np.float64)
+            lons_raw_dbg = np.asarray(opportunity["lons"], dtype=np.float64)
+            lons_dbg = _wrap_lon_180(lons_raw_dbg)
+            st.write(
+                {
+                    "lat_min": float(np.nanmin(lats_dbg)),
+                    "lat_max": float(np.nanmax(lats_dbg)),
+                    "lon_min_raw": float(np.nanmin(lons_raw_dbg)),
+                    "lon_max_raw": float(np.nanmax(lons_raw_dbg)),
+                    "lon_min_wrapped": float(np.nanmin(lons_dbg)),
+                    "lon_max_wrapped": float(np.nanmax(lons_dbg)),
+                    "n_points": int(len(df_pts)),
+                }
+            )
+
         # Optional downsample for performance if needed.
         max_points = 6000
         if len(df_pts) > max_points:
             df_pts = df_pts.sample(max_points, random_state=0)
 
+        lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
+        lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
+        zoom = _suggest_pydeck_zoom(lat_span, lon_span)
+        pitch = 0 if zoom <= 2.2 else 50
+
         view = pdk.ViewState(
             latitude=float(df_pts["lat"].median()),
             longitude=float(df_pts["lon"].median()),
-            zoom=4.3,
-            pitch=50,
+            zoom=zoom,
+            pitch=pitch,
         )
 
         # Grid cells (3D extruded)
-        cell_size_m = 55_000  # ~0.5° at equator
+        cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
         elevation_scale = 4000.0  # tune for visibility
         layer_cells = pdk.Layer(
             "GridCellLayer",
@@ -412,7 +466,7 @@ if opportunity is not None:
             "ScatterplotLayer",
             data=flagged,
             get_position=["lon", "lat"],
-            get_radius=45_000,
+            get_radius=max(20_000, int(round(0.8 * cell_size_m))),
             get_fill_color=[230, 30, 30, 190],
             pickable=True,
         )
@@ -432,14 +486,14 @@ if opportunity is not None:
             tooltip=tooltip,
             map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
         )
-        st.pydeck_chart(deck, use_container_width=True)
+        st.pydeck_chart(deck, width='stretch')
         st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
     except Exception as e:
         st.info(f"Interactive map unavailable ({e}). Showing static map below.")
 
 tail_risk_img = 'outputs/tail_risk_map.png'
 if os.path.exists(tail_risk_img):
-    st.image(tail_risk_img, use_container_width=True)
+    st.image(tail_risk_img, width='stretch')
 else:
     st.info('Tail-risk map not generated yet.')
 

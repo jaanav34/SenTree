@@ -12,6 +12,7 @@ References:
   - Velickovic et al. (2018) "Graph Attention Networks"
   - Gurjar & Camp (2026) for the feature engineering rationale
 """
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -114,8 +115,19 @@ class ClimateRiskGNN(nn.Module):
         return risk.squeeze(-1)
 
 
+def _sample_edge_index(edge_index, max_edges=1500):
+    """Downsample edges for lightweight visualization artifacts."""
+    edge_index = edge_index.detach().cpu()
+    n_edges = edge_index.shape[1]
+    if n_edges <= max_edges:
+        return edge_index.numpy().astype(np.int32)
+
+    step = max(1, n_edges // max_edges)
+    return edge_index[:, ::step][:, :max_edges].numpy().astype(np.int32)
+
+
 def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
-              weight_decay=1e-4, schedule=True):
+              weight_decay=1e-4, schedule=True, return_history=False):
     """
     Train with AdamW + cosine annealing + label smoothing.
     Uses Huber loss for robustness to outliers.
@@ -140,6 +152,17 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
 
     loss_fn = nn.HuberLoss(delta=0.5)
 
+    history = None
+    if return_history:
+        history = {
+            "positions": data.pos.detach().cpu().numpy().astype(np.float32),
+            "edge_index_sample": _sample_edge_index(data.edge_index),
+            "target": target.detach().cpu().numpy().astype(np.float32),
+            "predictions": [],
+            "loss": [],
+            "learning_rate": [],
+        }
+
     model.train()
     best_loss = float('inf')
     patience_counter = 0
@@ -159,12 +182,15 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-        if scheduler:
-            scheduler.step()
+        current_lr = optimizer.param_groups[0]['lr']
 
         if (epoch + 1) % 10 == 0:
-            current_lr = optimizer.param_groups[0]['lr']
             print(f"  Epoch {epoch+1}/{epochs}, Loss: {loss.item():.6f}, LR: {current_lr:.6f}")
+
+        if return_history:
+            history["predictions"].append(pred.detach().cpu().numpy().astype(np.float32))
+            history["loss"].append(float(loss.item()))
+            history["learning_rate"].append(float(current_lr))
 
         # Simple early stopping
         if loss.item() < best_loss - 1e-6:
@@ -172,6 +198,15 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
             patience_counter = 0
         else:
             patience_counter += 1
+
+        if scheduler:
+            scheduler.step()
+
+    if return_history:
+        history["predictions"] = np.stack(history["predictions"], axis=0)
+        history["loss"] = np.array(history["loss"], dtype=np.float32)
+        history["learning_rate"] = np.array(history["learning_rate"], dtype=np.float32)
+        return model, history
 
     return model
 

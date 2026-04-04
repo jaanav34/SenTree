@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import time
 from pathlib import Path
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -14,8 +15,379 @@ ensure_venv()
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+from matplotlib.collections import LineCollection
 
 st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
+
+st.markdown(
+    """
+    <style>
+    :root {
+        --sentree-ink: #18322d;
+        --sentree-ink-soft: #29443d;
+        --sentree-ink-muted: #5a6f69;
+        --sentree-accent: #0f766e;
+        --sentree-accent-warm: #b45309;
+        --sentree-card-top: rgba(255, 251, 245, 0.96);
+        --sentree-card-bottom: rgba(245, 249, 246, 0.94);
+        --sentree-sidebar-bg: linear-gradient(180deg, #17342f 0%, #1f2d3d 100%);
+        --sentree-sidebar-ink: #f4eedf;
+        --sentree-sidebar-muted: #d8d1bf;
+        --sentree-sidebar-field: rgba(251, 247, 238, 0.96);
+        --sentree-sidebar-border: rgba(244, 238, 223, 0.18);
+    }
+
+    .stApp {
+        background:
+            radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 30%),
+            radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 28%),
+            linear-gradient(180deg, #f1eee2 0%, #e4efe8 54%, #f6f3ea 100%);
+        color: var(--sentree-ink);
+    }
+
+    .block-container {
+        max-width: 1320px;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+    .sentree-hero {
+        position: relative;
+        overflow: hidden;
+        padding: 1.6rem 1.7rem 1.5rem 1.7rem;
+        border-radius: 28px;
+        background:
+            radial-gradient(circle at 85% 18%, rgba(255, 255, 255, 0.34), transparent 20%),
+            radial-gradient(circle at 10% 5%, rgba(15, 118, 110, 0.16), transparent 22%),
+            linear-gradient(135deg, rgba(255, 252, 246, 0.95), rgba(232, 243, 237, 0.92));
+        border: 1px solid rgba(23, 52, 47, 0.12);
+        box-shadow: 0 20px 50px rgba(23, 52, 47, 0.10);
+        margin-bottom: 1.4rem;
+    }
+
+    .sentree-hero::after {
+        content: "";
+        position: absolute;
+        inset: auto -5% -40% auto;
+        width: 280px;
+        height: 280px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(180, 83, 9, 0.12), transparent 68%);
+        pointer-events: none;
+    }
+
+    .sentree-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.35rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(23, 52, 47, 0.08);
+        color: var(--sentree-accent);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .sentree-hero h1 {
+        margin: 0.85rem 0 0.4rem 0;
+        font-size: 3rem;
+        line-height: 0.96;
+        max-width: 8.5ch;
+    }
+
+    .sentree-hero p {
+        margin: 0;
+        max-width: 54rem;
+        color: var(--sentree-ink-soft);
+        font-size: 1rem;
+    }
+
+    .sentree-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        margin-top: 1.1rem;
+    }
+
+    .sentree-badge {
+        padding: 0.48rem 0.72rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(23, 52, 47, 0.10);
+        color: #17342f;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .sentree-section {
+        margin: 1.35rem 0 0.35rem 0;
+    }
+
+    .sentree-section-label {
+        color: var(--sentree-accent);
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        margin-bottom: 0.3rem;
+    }
+
+    .sentree-section h2 {
+        margin: 0;
+        font-size: 2rem;
+    }
+
+    .sentree-section p {
+        margin: 0.28rem 0 0 0;
+        color: var(--sentree-ink-soft);
+        max-width: 55rem;
+    }
+
+    .sentree-card {
+        padding: 1.1rem 1.15rem;
+        border-radius: 22px;
+        background: linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(242, 248, 244, 0.92));
+        border: 1px solid rgba(23, 52, 47, 0.10);
+        box-shadow: 0 14px 38px rgba(23, 52, 47, 0.08);
+        margin-bottom: 1rem;
+    }
+
+    .sentree-card h3 {
+        margin: 0;
+        font-size: 1.08rem;
+    }
+
+    .sentree-card p {
+        margin: 0.38rem 0 0 0;
+        color: var(--sentree-ink-soft);
+        font-size: 0.95rem;
+    }
+
+    .sentree-kpi {
+        padding: 1rem 1.1rem;
+        border-radius: 20px;
+        background: linear-gradient(180deg, rgba(255, 250, 241, 0.96), rgba(236, 245, 239, 0.93));
+        border: 1px solid rgba(23, 52, 47, 0.10);
+        box-shadow: 0 12px 32px rgba(23, 52, 47, 0.08);
+        min-height: 118px;
+    }
+
+    .sentree-kpi-label {
+        color: var(--sentree-ink-muted);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+    }
+
+    .sentree-kpi-value {
+        margin-top: 0.48rem;
+        color: #17342f;
+        font-size: 2rem;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .sentree-kpi-sub {
+        margin-top: 0.42rem;
+        color: var(--sentree-ink-soft);
+        font-size: 0.92rem;
+    }
+
+    h1, h2, h3 {
+        color: #17342f;
+        letter-spacing: -0.02em;
+    }
+
+    section[data-testid="stSidebar"] > div {
+        background: var(--sentree-sidebar-bg);
+        border-right: 1px solid rgba(244, 238, 223, 0.12);
+    }
+
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
+        color: var(--sentree-sidebar-ink) !important;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] *,
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stSlider label,
+    section[data-testid="stSidebar"] .stTextInput label {
+        color: var(--sentree-sidebar-ink) !important;
+        font-weight: 700;
+    }
+
+    div[data-testid="stMetric"] {
+        background: linear-gradient(180deg, var(--sentree-card-top), var(--sentree-card-bottom));
+        border: 1px solid rgba(23, 52, 47, 0.16);
+        border-radius: 18px;
+        padding: 0.85rem 1rem;
+        box-shadow: 0 14px 40px rgba(23, 52, 47, 0.10);
+    }
+
+    div[data-testid="stMetricLabel"] p {
+        color: var(--sentree-ink-muted) !important;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+
+    div[data-testid="stMetricValue"] {
+        color: #17342f !important;
+        font-weight: 800;
+    }
+
+    div[data-testid="stMetricDelta"] {
+        color: var(--sentree-accent) !important;
+        font-weight: 700;
+    }
+
+    div.stButton > button, div[data-testid="stFormSubmitButton"] button {
+        border-radius: 999px;
+        border: 1px solid rgba(23, 52, 47, 0.22);
+        background: #17342f;
+        color: #f8f4ea;
+        font-weight: 700;
+        box-shadow: 0 10px 24px rgba(23, 52, 47, 0.16);
+    }
+
+    div.stButton > button:hover, div[data-testid="stFormSubmitButton"] button:hover {
+        background: var(--sentree-accent);
+        border-color: var(--sentree-accent);
+        color: #fffdf7;
+    }
+
+    div.stButton > button p, div[data-testid="stFormSubmitButton"] button p {
+        color: inherit !important;
+        font-weight: 700;
+    }
+
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="base-input"] {
+        background: rgba(255, 251, 245, 0.92);
+        border-color: rgba(23, 52, 47, 0.20);
+        color: #17342f;
+    }
+
+    div[data-baseweb="select"] span,
+    div[data-baseweb="base-input"] input {
+        color: #17342f !important;
+    }
+
+    div[data-testid="stWidgetLabel"] *,
+    label[data-baseweb="checkbox"] span,
+    .stSelectbox label,
+    .stSlider label,
+    .stTextInput label {
+        color: #23423c !important;
+        font-weight: 600;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+    section[data-testid="stSidebar"] div[data-baseweb="base-input"] {
+        background: var(--sentree-sidebar-field);
+        border-color: var(--sentree-sidebar-border);
+        color: #18322d;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+    section[data-testid="stSidebar"] div[data-baseweb="base-input"] input {
+        color: #18322d !important;
+    }
+
+    section[data-testid="stSidebar"] .sentree-card {
+        background: linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(241, 247, 244, 0.95));
+        border-color: rgba(23, 52, 47, 0.14);
+        box-shadow: 0 12px 28px rgba(8, 18, 22, 0.18);
+    }
+
+    section[data-testid="stSidebar"] .sentree-card h3 {
+        color: #17342f !important;
+    }
+
+    section[data-testid="stSidebar"] .sentree-card p {
+        color: #49615a !important;
+    }
+
+    section[data-testid="stSidebar"] div.stButton > button {
+        background: rgba(244, 238, 223, 0.12);
+        border-color: rgba(244, 238, 223, 0.22);
+        color: var(--sentree-sidebar-ink);
+        box-shadow: none;
+    }
+
+    section[data-testid="stSidebar"] div.stButton > button:hover {
+        background: rgba(15, 118, 110, 0.35);
+        border-color: rgba(15, 118, 110, 0.45);
+    }
+
+    section[data-testid="stSidebar"] [data-baseweb="checkbox"] > div {
+        color: var(--sentree-sidebar-ink);
+    }
+
+    div[data-testid="stSliderTickBarMin"],
+    div[data-testid="stSliderTickBarMax"] {
+        color: #42615a;
+    }
+
+    div[data-baseweb="slider"] [role="slider"] {
+        background: var(--sentree-accent);
+        border-color: var(--sentree-accent);
+    }
+
+    div[data-baseweb="slider"] > div > div {
+        background: rgba(15, 118, 110, 0.22);
+    }
+
+    div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stCaptionContainer"] {
+        color: var(--sentree-ink-soft);
+    }
+
+    div[data-testid="stAlert"] {
+        border-radius: 16px;
+    }
+
+    div[data-testid="stExpander"] {
+        border-radius: 18px;
+        border: 1px solid rgba(23, 52, 47, 0.10);
+        background: rgba(255, 252, 246, 0.8);
+        overflow: hidden;
+    }
+
+    div[data-testid="stExpander"] summary {
+        background: rgba(255, 252, 246, 0.84);
+    }
+
+    button[kind="tab"] {
+        border-radius: 999px;
+        border: 1px solid rgba(23, 52, 47, 0.10);
+        background: rgba(255, 252, 246, 0.72);
+        padding: 0.4rem 0.95rem;
+    }
+
+    button[kind="tab"][aria-selected="true"] {
+        background: #17342f;
+        color: #f8f4ea;
+    }
+
+    hr {
+        border-color: rgba(23, 52, 47, 0.08);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def _show_video(path_or_url: str) -> None:
@@ -26,30 +398,54 @@ def _show_video(path_or_url: str) -> None:
         return
     st.video(path_or_url)
 
-# --- Header ---
-st.title('SenTree: Resilience ROI Dashboard')
-st.markdown('*Climate Adaptation Intelligence for Sovereign Wealth Funds*')
-st.divider()
+
+def section_header(label: str, title: str, description: str) -> None:
+    st.markdown(
+        f"""
+        <div class="sentree-section">
+            <div class="sentree-section-label">{label}</div>
+            <h2>{title}</h2>
+            <p>{description}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def surface_card(title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="sentree-card">
+            <h3>{title}</h3>
+            <p>{body}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def kpi_card(label: str, value: str, subtitle: str) -> None:
+    st.markdown(
+        f"""
+        <div class="sentree-kpi">
+            <div class="sentree-kpi-label">{label}</div>
+            <div class="sentree-kpi-value">{value}</div>
+            <div class="sentree-kpi-sub">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header('Controls')
+    st.markdown('<div class="sentree-kicker">Mission Control</div>', unsafe_allow_html=True)
+    st.markdown("## Scenario Controls")
+    st.markdown("Tune the climate lens, intervention package, and search posture before diving into simulations.")
     scenario = st.selectbox('Climate Scenario', ['SSP3-7.0 (High Emissions)', 'SSP1-2.6 (Low Emissions)'])
     intervention = st.selectbox('Intervention', ['Coastal Mangrove Restoration', 'Regenerative Agriculture', 'Both'])
     st.divider()
-    st.markdown('**Region:** SE Asia Coastal')
-    st.markdown('**Time:** 2015-2100')
-
-# --- Search ---
-col1, col2 = st.columns([3, 1])
-with col1:
-    query = st.text_input(
-        'Search simulations',
-        placeholder='e.g., "Show where mangroves prevent collapse"',
-        key='search_query'
-    )
-with col2:
-    search_btn = st.button('Search', type='primary', use_container_width=True)
+    surface_card("Deployment Region", "SE Asia coastal network with tail-risk emphasis on dense coastal and agricultural nodes.")
+    surface_card("Forecast Horizon", "2015-2100 scenario window with intervention comparisons and searchable video outputs.")
 
 # --- Load results ---
 @st.cache_data
@@ -76,9 +472,6 @@ def load_roi_data():
     }
 
 
-roi_data = load_roi_data()
-
-
 @st.cache_data
 def load_risk_timeseries():
     path = "outputs/roi/risk_timeseries.json"
@@ -86,6 +479,24 @@ def load_risk_timeseries():
         with open(path, "r") as f:
             return json.load(f)
     return None
+
+
+@st.cache_data
+def load_training_history():
+    path = "outputs/roi/gnn_training_history.npz"
+    if not os.path.exists(path):
+        return None
+
+    with np.load(path) as data:
+        history = {key: data[key] for key in data.files}
+
+    predictions = history["predictions"]
+    history["epochs"] = np.arange(1, predictions.shape[0] + 1, dtype=np.int32)
+    history["mean_risk"] = predictions.mean(axis=1)
+    history["p95_risk"] = np.percentile(predictions, 95, axis=1)
+    history["max_risk"] = predictions.max(axis=1)
+    history["tail_threshold"] = float(np.percentile(history["target"], 95))
+    return history
 
 
 @st.cache_data
@@ -101,6 +512,12 @@ def load_opportunity_map():
         "lons": data["lons"],
         "years": data["years"],
     }
+
+
+roi_data = load_roi_data()
+ts = load_risk_timeseries()
+training = load_training_history()
+opportunity = load_opportunity_map()
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -189,9 +606,199 @@ def _opportunity_points(opportunity):
     df["color"] = colors.tolist()
     return df, (vmin, vmax)
 
+
+def build_training_figure(training, epoch_idx, show_edges=True, highlight_targets=True):
+    positions = training["positions"]
+    lats = positions[:, 0]
+    lons = positions[:, 1]
+    pred = training["predictions"][epoch_idx]
+    loss = training["loss"]
+    mean_risk = training["mean_risk"]
+    p95_risk = training["p95_risk"]
+    target = training["target"]
+
+    fig = plt.figure(figsize=(14, 7.2))
+    grid = fig.add_gridspec(2, 2, width_ratios=[1.75, 1], height_ratios=[1, 1], wspace=0.22, hspace=0.3)
+    ax_map = fig.add_subplot(grid[:, 0])
+    ax_loss = fig.add_subplot(grid[0, 1])
+    ax_risk = fig.add_subplot(grid[1, 1])
+
+    if show_edges and training["edge_index"].size > 0:
+        edge_index = training["edge_index"]
+        segments = [
+            [(lons[src], lats[src]), (lons[dst], lats[dst])]
+            for src, dst in zip(edge_index[0], edge_index[1])
+        ]
+        edge_collection = LineCollection(segments, colors=(0.09, 0.2, 0.18, 0.08), linewidths=0.5)
+        ax_map.add_collection(edge_collection)
+
+    scatter = ax_map.scatter(
+        lons,
+        lats,
+        c=pred,
+        s=14 + pred * 26,
+        cmap="RdYlGn_r",
+        vmin=0.0,
+        vmax=1.0,
+        alpha=0.9,
+        linewidths=0,
+    )
+
+    if highlight_targets:
+        tail_mask = target >= training["tail_threshold"]
+        ax_map.scatter(
+            lons[tail_mask],
+            lats[tail_mask],
+            s=44,
+            facecolors="none",
+            edgecolors="#17342f",
+            linewidths=0.9,
+            alpha=0.75,
+        )
+
+    ax_map.set_title(f"Node Risk Field at Epoch {epoch_idx + 1}", loc="left", fontsize=13, fontweight="bold")
+    ax_map.set_xlabel("Longitude")
+    ax_map.set_ylabel("Latitude")
+    ax_map.set_facecolor("#fffdf7")
+    ax_map.grid(alpha=0.12)
+
+    cbar = fig.colorbar(scatter, ax=ax_map, fraction=0.035, pad=0.02)
+    cbar.set_label("Predicted systemic risk")
+
+    epochs = training["epochs"]
+    ax_loss.plot(epochs, loss, color="#0f766e", linewidth=2.2)
+    ax_loss.scatter([epoch_idx + 1], [loss[epoch_idx]], color="#ea580c", s=52, zorder=3)
+    ax_loss.axvline(epoch_idx + 1, color="#ea580c", linestyle="--", linewidth=1.1, alpha=0.7)
+    ax_loss.set_title("Optimization Progress", loc="left", fontsize=12, fontweight="bold")
+    ax_loss.set_xlabel("Epoch")
+    ax_loss.set_ylabel("Huber loss")
+    ax_loss.grid(alpha=0.18)
+    ax_loss.set_facecolor("#fffdf7")
+
+    ax_risk.plot(epochs, mean_risk, color="#2563eb", linewidth=2.2, label="Mean risk")
+    ax_risk.plot(epochs, p95_risk, color="#b91c1c", linewidth=2.2, label="95th pct risk")
+    ax_risk.scatter([epoch_idx + 1], [mean_risk[epoch_idx]], color="#2563eb", s=48, zorder=3)
+    ax_risk.scatter([epoch_idx + 1], [p95_risk[epoch_idx]], color="#b91c1c", s=48, zorder=3)
+    ax_risk.axvline(epoch_idx + 1, color="#ea580c", linestyle="--", linewidth=1.1, alpha=0.7)
+    ax_risk.set_title("Prediction Profile", loc="left", fontsize=12, fontweight="bold")
+    ax_risk.set_xlabel("Epoch")
+    ax_risk.set_ylabel("Risk score")
+    ax_risk.grid(alpha=0.18)
+    ax_risk.set_facecolor("#fffdf7")
+    ax_risk.legend(frameon=False, loc="upper left")
+
+    fig.patch.set_facecolor("#fffaf2")
+    return fig
+
+
+def render_training_frame(viz_placeholder, metrics_placeholder, training, epoch_idx, show_edges=True, highlight_targets=True):
+    pred = training["predictions"][epoch_idx]
+    prev = training["predictions"][epoch_idx - 1] if epoch_idx > 0 else pred
+    tail_mask = training["target"] >= training["tail_threshold"]
+
+    with metrics_placeholder.container():
+        cols = st.columns(4)
+        cols[0].metric("Epoch", f"{epoch_idx + 1}/{len(training['epochs'])}")
+        cols[1].metric(
+            "Training Loss",
+            f"{training['loss'][epoch_idx]:.4f}",
+            f"{(training['loss'][epoch_idx] - training['loss'][epoch_idx - 1]):+.4f}" if epoch_idx > 0 else None,
+        )
+        cols[2].metric(
+            "Mean Node Risk",
+            f"{pred.mean():.3f}",
+            f"{(pred.mean() - prev.mean()):+.3f}" if epoch_idx > 0 else None,
+        )
+        cols[3].metric(
+            "Neutralized Tail Nodes",
+            f"{int((tail_mask & (pred < training['tail_threshold'])).sum())}",
+            f"Tracked: {int(tail_mask.sum())}",
+        )
+
+    fig = build_training_figure(training, epoch_idx, show_edges=show_edges, highlight_targets=highlight_targets)
+    viz_placeholder.pyplot(fig, use_container_width=True)
+    plt.close(fig)
+
+
+def build_risk_timeseries_figure(ts, metric):
+    years = np.array(ts["years"])
+    fig, ax = plt.subplots(figsize=(12.8, 4.6))
+
+    series = [("Baseline", ts["baseline"][metric], "#17342f")]
+    if "mangrove_restoration" in ts:
+        series.append(("Mangrove Restoration", ts["mangrove_restoration"][metric], "#0f766e"))
+    if "regenerative_agriculture" in ts:
+        series.append(("Regenerative Agriculture", ts["regenerative_agriculture"][metric], "#b45309"))
+
+    for name, values, color in series:
+        values_arr = np.array(values)
+        ax.plot(years, values_arr, linewidth=2.4, color=color, label=name)
+        ax.scatter([years[-1]], [values_arr[-1]], color=color, s=42, zorder=3)
+
+    ax.set_title("Systemic Risk Trajectory", loc="left", fontsize=14, fontweight="bold")
+    ax.set_xlabel("Year")
+    ax.set_ylabel(metric.upper())
+    ax.grid(alpha=0.16)
+    ax.legend(frameon=False, loc="upper left", ncols=len(series))
+    ax.set_facecolor("#fffdf7")
+    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
+    fig.patch.set_facecolor("#fffaf2")
+    return fig
+
+
+top_intervention = max(roi_data.values(), key=lambda item: item.get("roi", 0.0))
+training_status = "Training snapshots ready" if training is not None else "Run pipeline to generate playback"
+video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
+
+st.markdown(
+    f"""
+    <div class="sentree-hero">
+        <div class="sentree-kicker">Climate adaptation intelligence</div>
+        <h1>SenTree</h1>
+        <p>
+            A decision cockpit for climate-risk propagation, resilience ROI, and intervention storytelling.
+            Explore where the graph neural network sees cascading risk, how mitigation strategies alter the map,
+            and which assets deserve immediate attention.
+        </p>
+        <div class="sentree-badges">
+            <div class="sentree-badge">Scenario: {scenario}</div>
+            <div class="sentree-badge">Focus: {intervention}</div>
+            <div class="sentree-badge">Region: SE Asia Coastal</div>
+            <div class="sentree-badge">{training_status}</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+hero_cols = st.columns(4)
+with hero_cols[0]:
+    kpi_card("Best ROI", f"{top_intervention.get('roi', 0):.2f}x", top_intervention["name"])
+with hero_cols[1]:
+    kpi_card("Loss Avoided", f"${top_intervention.get('total_loss_avoided', 0)/1e9:.1f}B", "Top intervention impact")
+with hero_cols[2]:
+    kpi_card("Training Epochs", str(int(len(training["epochs"])) if training is not None else 0), "Epoch playback depth")
+with hero_cols[3]:
+    kpi_card("Rendered Videos", str(video_count), "Simulation clips available")
+
+section_header(
+    "Discover",
+    "Search the simulation library",
+    "Use natural language to find the most relevant intervention videos, then inspect the ROI metrics that support each result.",
+)
+search_cols = st.columns([3.2, 1])
+with search_cols[0]:
+    query = st.text_input(
+        'Search simulations',
+        placeholder='e.g., "Show where mangroves prevent collapse"',
+        key='search_query'
+    )
+with search_cols[1]:
+    search_btn = st.button('Search', type='primary', use_container_width=True)
+
 # --- Search Results ---
 if search_btn and query:
-    st.subheader('Search Results')
+    surface_card("Search Results", "Ranked video matches using vector search and intervention metadata.")
 
     try:
         from src.embedding.vectordb import VideoSearchDB
@@ -227,12 +834,19 @@ if search_btn and query:
         st.info('Showing demo results instead.')
 
 # --- Metrics Dashboard ---
-st.subheader('Intervention Comparison')
+section_header(
+    "Compare",
+    "Intervention comparison",
+    "Read the payoff of each resilience strategy across ROI, avoided loss, and risk reduction before drilling into the training playback.",
+)
 
 cols = st.columns(len(roi_data))
 for i, (key, data) in enumerate(roi_data.items()):
     with cols[i]:
-        st.markdown(f"**{data['name']}**")
+        surface_card(
+            data['name'],
+            "Financial and systemic impact snapshot for the currently indexed intervention pathway.",
+        )
         st.metric('Resilience ROI', f"{data['roi']:.2f}x",
                    help=f"Range: {data.get('roi_lower', 0):.2f} - {data.get('roi_upper', 0):.2f}")
         st.metric('Total Loss Avoided', f"${data.get('total_loss_avoided', 0)/1e9:.1f}B")
@@ -242,8 +856,71 @@ for i, (key, data) in enumerate(roi_data.items()):
         if tail_count > 0:
             st.error(f'Tail-Risk Nodes Neutralized: {tail_count}')
 
+# --- GNN Training Animation ---
+section_header(
+    "Playback",
+    "Interactive GNN training playback",
+    "Scrub through epochs to see how node-level risk estimates stabilize and how the optimizer reshapes the graph-wide profile.",
+)
+
+if training is None:
+    st.info("Training history not found yet. Re-run `python scripts/run_pipeline.py` to generate `outputs/roi/gnn_training_history.npz`.")
+else:
+    total_epochs = int(len(training["epochs"]))
+    if "training_epoch_idx" not in st.session_state:
+        st.session_state.training_epoch_idx = total_epochs - 1
+    st.session_state.training_epoch_idx = min(max(int(st.session_state.training_epoch_idx), 0), total_epochs - 1)
+
+    control_cols = st.columns([4, 1, 1, 1.3, 1.3])
+    epoch_selected = control_cols[0].slider(
+        "Epoch",
+        min_value=1,
+        max_value=total_epochs,
+        value=st.session_state.training_epoch_idx + 1,
+    )
+    play_btn = control_cols[1].button("Play", use_container_width=True)
+    reset_btn = control_cols[2].button("Reset", use_container_width=True)
+    playback_speed = control_cols[3].selectbox("Speed", ["Slow", "Medium", "Fast"], index=1)
+    show_edges = control_cols[4].checkbox("Show graph", value=True)
+    highlight_targets = st.checkbox("Highlight hardest tail-risk targets", value=True)
+
+    if reset_btn:
+        st.session_state.training_epoch_idx = 0
+    else:
+        st.session_state.training_epoch_idx = epoch_selected - 1
+
+    speed_seconds = {"Slow": 0.55, "Medium": 0.22, "Fast": 0.08}[playback_speed]
+    metrics_placeholder = st.empty()
+    viz_placeholder = st.empty()
+
+    if play_btn:
+        for frame_idx in range(st.session_state.training_epoch_idx, total_epochs):
+            st.session_state.training_epoch_idx = frame_idx
+            render_training_frame(
+                viz_placeholder,
+                metrics_placeholder,
+                training,
+                frame_idx,
+                show_edges=show_edges,
+                highlight_targets=highlight_targets,
+            )
+            time.sleep(speed_seconds)
+    else:
+        render_training_frame(
+            viz_placeholder,
+            metrics_placeholder,
+            training,
+            st.session_state.training_epoch_idx,
+            show_edges=show_edges,
+            highlight_targets=highlight_targets,
+        )
+
 # --- Video Display ---
-st.subheader('Simulation Videos')
+section_header(
+    "Watch",
+    "Simulation videos",
+    "Review the rendered outputs that feed the search index and communicate the intervention story visually.",
+)
 
 video_dir = 'outputs/videos'
 if os.path.exists(video_dir):
@@ -260,7 +937,11 @@ else:
 
 # --- Math & Methodology Tab ---
 st.divider()
-st.header('Technical Deep-Dive: Math & Methodology')
+section_header(
+    "Explain",
+    "Technical deep-dive",
+    "Inspect the mathematical assumptions behind tail-risk escalation, ROI estimation, and the graph model itself.",
+)
 
 math_tab, playground_tab = st.tabs(['📐 Mathematical Foundations', '🎮 Interactive Playground'])
 
@@ -343,27 +1024,25 @@ with playground_tab:
     """)
 
 # --- Quantitative Risk Chart ---
-st.subheader("Risk Over Time")
-ts = load_risk_timeseries()
+section_header(
+    "Monitor",
+    "Risk over time",
+    "Track how baseline and intervention pathways diverge across the full simulation horizon.",
+)
 if ts is None:
     st.info("Risk time series not found yet. Re-run the pipeline to generate `outputs/roi/risk_timeseries.json`.")
 else:
     metric = st.selectbox("Metric", ["mean", "p95", "max"], index=0)
-    years = ts["years"]
-    chart = {"Year": years}
-    chart["Baseline"] = ts["baseline"][metric]
-    if "mangrove_restoration" in ts:
-        chart["Mangrove Restoration"] = ts["mangrove_restoration"][metric]
-    if "regenerative_agriculture" in ts:
-        chart["Regenerative Agriculture"] = ts["regenerative_agriculture"][metric]
-    df = pd.DataFrame(chart).set_index("Year")
-    st.line_chart(df)
+    fig = build_risk_timeseries_figure(ts, metric)
+    st.pyplot(fig, use_container_width=True)
+    plt.close(fig)
 
 # --- Tail Risk Map ---
-st.subheader('Tail-Risk Escalation Map')
-st.markdown('Nodes exceeding 95th percentile volatility+momentum threshold are flagged.')
-
-opportunity = load_opportunity_map()
+section_header(
+    "Locate",
+    "Tail-risk escalation map",
+    "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model’s extreme-regime threshold.",
+)
 if opportunity is not None:
     st.markdown("**Interactive 3D Opportunity Overlay** (hover any cell to see a real-world label).")
     try:

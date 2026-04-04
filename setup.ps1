@@ -1,15 +1,59 @@
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
+  $global:PSNativeCommandUseErrorActionPreference = $false
+}
 
 Write-Host "=== SenTree Setup (Windows PowerShell) ==="
+
+function Invoke-Proc {
+  param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Args
+  )
+  function Quote-Arg([string]$arg) {
+    if ($null -eq $arg -or $arg.Length -eq 0) { return '""' }
+    if ($arg -notmatch '[\s"]') { return $arg }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    $backslashes = 0
+    foreach ($ch in $arg.ToCharArray()) {
+      if ($ch -eq '\') {
+        $backslashes++
+        continue
+      }
+      if ($ch -eq '"') {
+        [void]$sb.Append(('\' * ($backslashes * 2 + 1)))
+        [void]$sb.Append('"')
+        $backslashes = 0
+        continue
+      }
+      if ($backslashes -gt 0) {
+        [void]$sb.Append(('\' * $backslashes))
+        $backslashes = 0
+      }
+      [void]$sb.Append($ch)
+    }
+    if ($backslashes -gt 0) {
+      [void]$sb.Append(('\' * ($backslashes * 2)))
+    }
+    [void]$sb.Append('"')
+    return $sb.ToString()
+  }
+
+  $argLine = ($Args | ForEach-Object { Quote-Arg $_ }) -join ' '
+  $p = Start-Process -FilePath $Exe -ArgumentList $argLine -NoNewWindow -Wait -PassThru
+  return $p.ExitCode
+}
 
 function Invoke-Checked {
   param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Args
   )
-  & $Exe @Args
-  if ($LASTEXITCODE -ne 0) {
-    throw "Command failed ($LASTEXITCODE): $Exe $($Args -join ' ')"
+  $code = Invoke-Proc $Exe @Args
+  if ($code -ne 0) {
+    throw "Command failed ($code): $Exe $($Args -join ' ')"
   }
 }
 
@@ -31,10 +75,15 @@ function Resolve-Python {
   throw "Python not found. Install Python 3.x (and ensure `python` or `py` is on PATH)."
 }
 
-$pythonCmd = Resolve-Python
-$pyExe = $pythonCmd[0]
-$pyArgs = @()
-if ($pythonCmd.Length -gt 1) { $pyArgs = @($pythonCmd[1]) }
+if ($env:SENTREE_PYTHON) {
+  $pyExe = $env:SENTREE_PYTHON
+  $pyArgs = @()
+} else {
+  $pythonCmd = Resolve-Python
+  $pyExe = $pythonCmd[0]
+  $pyArgs = @()
+  if ($pythonCmd.Length -gt 1) { $pyArgs = @($pythonCmd[1]) }
+}
 
 $versionStr = (& $pyExe @pyArgs -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
 if ($versionStr -match '^(\d+)\.(\d+)$') {
@@ -47,7 +96,18 @@ if ($versionStr -match '^(\d+)\.(\d+)$') {
 
 if (-not (Test-Path ".venv")) {
   Write-Host "Creating virtual environment at .venv ..."
-  Invoke-Checked $pyExe @pyArgs "-m" "venv" ".venv"
+  New-Item -ItemType Directory -Force -Path ".tmp" | Out-Null
+  $oldTemp = $env:TEMP
+  $oldTmp = $env:TMP
+  $tmpDir = (Resolve-Path ".tmp").Path
+  $env:TEMP = $tmpDir
+  $env:TMP = $tmpDir
+
+  # `venv` may fail when trying to run ensurepip in locked-down temp dirs; we bootstrap pip ourselves below.
+  Invoke-Checked $pyExe @pyArgs "-m" "venv" "--without-pip" ".venv"
+
+  $env:TEMP = $oldTemp
+  $env:TMP = $oldTmp
 }
 
 $venvPython = Join-Path ".venv" "Scripts\python.exe"
@@ -56,8 +116,8 @@ if (-not (Test-Path $venvPython)) {
 }
 
 function Ensure-VenvPip {
-  & $venvPython -m pip --version 2>$null
-  if ($LASTEXITCODE -eq 0) { return }
+  $code = Invoke-Proc $venvPython "-c" "import pip; print(pip.__version__)"
+  if ($code -eq 0) { return }
 
   Write-Host "Bootstrapping pip inside .venv..."
   New-Item -ItemType Directory -Force -Path ".tmp" | Out-Null
@@ -68,17 +128,15 @@ function Ensure-VenvPip {
   $env:TEMP = $tmpDir
   $env:TMP = $tmpDir
 
-  & $venvPython -m ensurepip --upgrade --default-pip 2>$null
-  if ($LASTEXITCODE -ne 0) {
-    Write-Warning "ensurepip failed; extracting bundled pip wheel as a fallback..."
-    Invoke-Checked $venvPython "-c" "import ensurepip, pathlib, zipfile, ensurepip._bundled; import os; site=r'$(Resolve-Path '.\\.venv\\Lib\\site-packages')'; p=next(pathlib.Path(ensurepip._bundled.__path__[0]).glob('pip-*.whl')); zipfile.ZipFile(p).extractall(site); print('pip extracted from', p)"
-  }
+  # Avoid `ensurepip` because it relies on creating a temp directory which is often blocked by endpoint protection.
+  $site = (Resolve-Path ".\\.venv\\Lib\\site-packages").Path
+  Invoke-Checked $venvPython "-c" "import ensurepip, pathlib, zipfile, ensurepip._bundled; site=r'$site'; p=next(pathlib.Path(ensurepip._bundled.__path__[0]).glob('pip-*.whl')); zipfile.ZipFile(p).extractall(site); print('pip extracted from', p)"
 
   $env:TEMP = $oldTemp
   $env:TMP = $oldTmp
 
-  & $venvPython -m pip --version 2>$null
-  if ($LASTEXITCODE -ne 0) {
+  $code = Invoke-Proc $venvPython "-c" "import pip; print(pip.__version__)"
+  if ($code -ne 0) {
     throw "pip could not be installed into .venv (even after fallback)."
   }
 }
@@ -94,7 +152,8 @@ Invoke-Checked $venvPython "-m" "pip" "install" "--require-virtualenv" "-r" "req
 # PyG CPU extras install (best-effort)
 Write-Host "Installing PyG CPU extras (best-effort)..."
 try {
-  & $venvPython -m pip install --require-virtualenv torch-scatter torch-sparse -f "https://data.pyg.org/whl/torch-2.1.0+cpu.html" | Out-Host
+  $pygUrl = (& $venvPython -c "import torch; v=torch.__version__.split('+')[0]; cuda=getattr(torch.version,'cuda',None); tag=(f'cu{cuda.replace(\".\",\"\")}' if cuda else 'cpu'); print(f'https://data.pyg.org/whl/torch-{v}+{tag}.html')").Trim()
+  & $venvPython -m pip install --require-virtualenv --only-binary=:all: torch-scatter torch-sparse -f $pygUrl | Out-Host
 } catch {
   Write-Warning "PyG extras install failed - GCNConv may still work without them"
 }

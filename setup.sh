@@ -32,7 +32,7 @@ fi
 "$VENV_PY" -m pip install --require-virtualenv -r requirements.txt
 
 # PyG CPU install (safe for hackathon)
-"$VENV_PY" -m pip install --require-virtualenv torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.1.0+cpu.html 2>/dev/null || echo "PyG extras install failed - GCNConv may still work without them"
+"$VENV_PY" -m pip install --require-virtualenv --only-binary=:all: torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.1.0+cpu.html 2>/dev/null || echo "PyG extras install failed - GCNConv may still work without them"
 
 # Create directories
 mkdir -p data/raw data/processed outputs/videos outputs/roi outputs/embeddings

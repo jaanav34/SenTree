@@ -189,6 +189,17 @@ render_tail_risk_map(
     label='Total Avoided Damage Potential (Risk Reduction)'
 )
 
+# Save underlying grids for interactive dashboard overlays
+os.makedirs("outputs/roi", exist_ok=True)
+np.savez_compressed(
+    "outputs/roi/opportunity_map.npz",
+    total_reduction_map=total_reduction_map.astype(np.float32),
+    tail_flags=flags_series[-1].astype(np.uint8),
+    lats=np.asarray(data["lats"], dtype=np.float64),
+    lons=np.asarray(data["lons"], dtype=np.float64),
+    years=np.asarray(years, dtype=np.int32),
+)
+
 # PRINT COORDINATES TO CLI FOR IMMEDIATE ACTION
 flagged_lats = data['lats'].repeat(nlon)[flags_series[-1].flatten()]
 flagged_lons = np.tile(data['lons'], nlat)[flags_series[-1].flatten()]

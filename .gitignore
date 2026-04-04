@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .env
 *.egg-info/
+.codex/
+.claude/
+.synq/

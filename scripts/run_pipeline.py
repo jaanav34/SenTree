@@ -42,6 +42,10 @@ nlat, nlon = data['tas'].shape[1], data['tas'].shape[2]
 print(f"  Shape: {data['tas'].shape} — {T} years, {nlat}x{nlon} grid")
 print(f"  Years: {years[0]} to {years[-1]}")
 
+# Precompute Köppen-Geiger codes for climate-relative stabilization
+print("  Precomputing Köppen-Geiger climate classification...")
+data['kg_codes'] = classify_grid(data['tas_monthly'], data['pr_monthly'])
+
 # 2. Compute tail risk (Gurjar & Camp 2026 + Hawkes process)
 print("\n[2/7] Computing tail-risk scores...")
 scores, flags, threshold, regime, components = compute_tail_risk(data)

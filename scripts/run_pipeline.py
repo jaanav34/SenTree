@@ -35,12 +35,16 @@ print("=" * 60)
 
 # 1. Load data
 print("\n[1/7] Loading climate data...")
-data = load_climate_data()
+region = os.environ.get("SENTREE_REGION", "se_asia")
+coarsen = int(os.environ.get("SENTREE_COARSEN", "1"))
+intervention_strength = float(os.environ.get("SENTREE_INTERVENTION_STRENGTH", "1.0"))
+data = load_climate_data(region=region, coarsen=coarsen)
 years = data['years']
 T = len(years)
 nlat, nlon = data['tas'].shape[1], data['tas'].shape[2]
 print(f"  Shape: {data['tas'].shape} — {T} years, {nlat}x{nlon} grid")
 print(f"  Years: {years[0]} to {years[-1]}")
+print(f"  Region: {region} | Coarsen: {coarsen}x | Intervention strength: {intervention_strength:g}x")
 
 # Precompute Köppen-Geiger codes for climate-relative stabilization
 print("  Precomputing Köppen-Geiger climate classification...")
@@ -131,7 +135,9 @@ for t in range(T):
     baseline_risk_series.append(b_risk.reshape(nlat, nlon))
 
     for key, interv in INTERVENTIONS.items():
-        mod_feats = apply_intervention(feats_raw, positions, interv, lons, scaler=scaler)
+        mod_feats = apply_intervention(
+            feats_raw, positions, interv, lons, scaler=scaler, strength=intervention_strength
+        )
         mod_data = PyGData(
             x=torch.from_numpy(np.asarray(mod_feats, dtype=np.float32)),
             edge_index=graph_data.edge_index,
@@ -201,6 +207,17 @@ render_tail_risk_map(
     'outputs/tail_risk_map.png',
     title='Strategic Resilience Opportunity & ROI Target Map',
     label='Total Avoided Damage Potential (Risk Reduction)'
+)
+
+# Save underlying grids for interactive dashboard overlays
+os.makedirs("outputs/roi", exist_ok=True)
+np.savez_compressed(
+    "outputs/roi/opportunity_map.npz",
+    total_reduction_map=total_reduction_map.astype(np.float32),
+    tail_flags=flags_series[-1].astype(np.uint8),
+    lats=np.asarray(data["lats"], dtype=np.float64),
+    lons=np.asarray(data["lons"], dtype=np.float64),
+    years=np.asarray(years, dtype=np.int32),
 )
 
 # PRINT COORDINATES TO CLI FOR IMMEDIATE ACTION

@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+from pathlib import Path
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, ROOT_DIR)
@@ -15,6 +16,15 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
+
+
+def _show_video(path_or_url: str) -> None:
+    """Render a video from a local path (cluster filesystem) or a URL."""
+    p = Path(path_or_url)
+    if p.exists():
+        st.video(p.read_bytes(), format="video/mp4")
+        return
+    st.video(path_or_url)
 
 # --- Header ---
 st.title('SenTree: Resilience ROI Dashboard')
@@ -77,6 +87,116 @@ def load_risk_timeseries():
             return json.load(f)
     return None
 
+
+@st.cache_data
+def load_opportunity_map():
+    path = "outputs/roi/opportunity_map.npz"
+    if not os.path.exists(path):
+        return None
+    data = np.load(path, allow_pickle=False)
+    return {
+        "total_reduction_map": data["total_reduction_map"],
+        "tail_flags": data["tail_flags"].astype(bool),
+        "lats": data["lats"],
+        "lons": data["lons"],
+        "years": data["years"],
+    }
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Vectorized haversine distance (km)."""
+    R = 6371.0
+    lat1 = np.radians(lat1)
+    lon1 = np.radians(lon1)
+    lat2 = np.radians(lat2)
+    lon2 = np.radians(lon2)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return R * c
+
+
+def _wrap_lon_180(lon):
+    """Normalize longitude to [-180, 180] for WebMercator map renderers (pydeck/mapbox)."""
+    lon = np.asarray(lon, dtype=np.float64)
+    lon = np.where(lon > 180.0, lon - 360.0, lon)
+    lon = np.where(lon < -180.0, lon + 360.0, lon)
+    return lon
+
+
+@st.cache_data
+def _opportunity_points(opportunity):
+    """Flatten grids into a dataframe with nearest-city labels (offline)."""
+    lats = opportunity["lats"]
+    lons = opportunity["lons"]
+    value_grid = opportunity["total_reduction_map"]
+    flags_grid = opportunity["tail_flags"]
+
+    lat_grid, lon_grid = np.meshgrid(lats, lons, indexing="ij")
+    lat_flat = lat_grid.flatten()
+    lon_flat = _wrap_lon_180(lon_grid.flatten())
+    values = value_grid.flatten()
+    flags = flags_grid.flatten()
+
+    # Minimal offline "real-life location" labeling: nearest major city.
+    # (Avoids external reverse-geocoding calls.)
+    cities = [
+        ("Bangkok", 13.7563, 100.5018),
+        ("Jakarta", -6.2088, 106.8456),
+        ("Manila", 14.5995, 120.9842),
+        ("Singapore", 1.3521, 103.8198),
+        ("Kuala Lumpur", 3.1390, 101.6869),
+        ("Ho Chi Minh City", 10.8231, 106.6297),
+        ("Hanoi", 21.0278, 105.8342),
+        ("Phnom Penh", 11.5564, 104.9282),
+        ("Vientiane", 17.9757, 102.6331),
+        ("Yangon", 16.8409, 96.1735),
+        ("Cebu", 10.3157, 123.8854),
+        ("Davao", 7.1907, 125.4553),
+        ("Denpasar", -8.6705, 115.2126),
+        ("Surabaya", -7.2575, 112.7521),
+        ("Medan", 3.5952, 98.6722),
+    ]
+
+    city_names = np.array([c[0] for c in cities], dtype=object)
+    city_lats = np.array([c[1] for c in cities], dtype=np.float64)
+    city_lons = np.array([c[2] for c in cities], dtype=np.float64)
+
+    # Compute nearest city for each cell (vectorized over cities)
+    # Dist matrix: (n_points, n_cities)
+    dists = np.stack([
+        _haversine_km(lat_flat, lon_flat, city_lats[i], city_lons[i]) for i in range(len(cities))
+    ], axis=1)
+    idx = np.argmin(dists, axis=1)
+    nearest = city_names[idx]
+    nearest_km = dists[np.arange(dists.shape[0]), idx]
+
+    # Normalize values for color mapping
+    vmin = float(np.nanmin(values))
+    vmax = float(np.nanmax(values))
+    denom = (vmax - vmin) if (vmax - vmin) > 1e-12 else 1.0
+    norm = np.clip((values - vmin) / denom, 0, 1)
+
+    # Green ramp (light -> deep)
+    colors = np.column_stack([
+        (40 * (1 - norm)).astype(int),          # R (slight tint)
+        (220 * norm + 30).astype(int),          # G
+        (40 * (1 - norm)).astype(int),          # B (slight tint)
+        np.full_like(norm, 160, dtype=int),     # A
+    ])
+
+    df = pd.DataFrame({
+        "lat": lat_flat.astype(float),
+        "lon": lon_flat.astype(float),
+        "value": values.astype(float),
+        "tail_flag": flags.astype(bool),
+        "nearest_city": nearest,
+        "nearest_km": nearest_km.astype(float),
+    })
+    df["color"] = colors.tolist()
+    return df, (vmin, vmax)
+
 # --- Search Results ---
 if search_btn and query:
     st.subheader('Search Results')
@@ -95,7 +215,7 @@ if search_btn and query:
                 with st.expander(f'Result {i+1}: {metadata.get("title", vid_id)} — Relevance: {similarity:.1%}', expanded=(i == 0)):
                     video_path = metadata.get('video_path', f'outputs/videos/{vid_id}.mp4')
                     if os.path.exists(video_path):
-                        st.video(video_path)
+                        _show_video(video_path)
 
                     c1, c2, c3 = st.columns(3)
                     roi_key = metadata.get('intervention_key', '')
@@ -140,7 +260,7 @@ if os.path.exists(video_dir):
         tabs = st.tabs([v.replace('.mp4', '').replace('_', ' ').title() for v in videos])
         for tab, vid in zip(tabs, videos):
             with tab:
-                st.video(os.path.join(video_dir, vid))
+                _show_video(os.path.join(video_dir, vid))
     else:
         st.info('No videos generated yet. Run `python scripts/run_pipeline.py`.')
 else:
@@ -260,6 +380,72 @@ else:
 # --- Tail Risk Map ---
 st.subheader('Tail-Risk Escalation Map')
 st.markdown('Nodes exceeding 95th percentile volatility+momentum threshold are flagged.')
+
+opportunity = load_opportunity_map()
+if opportunity is not None:
+    st.markdown("**Interactive 3D Opportunity Overlay** (hover any cell to see a real-world label).")
+    try:
+        import pydeck as pdk
+
+        df_pts, (vmin, vmax) = _opportunity_points(opportunity)
+
+        # Optional downsample for performance if needed.
+        max_points = 6000
+        if len(df_pts) > max_points:
+            df_pts = df_pts.sample(max_points, random_state=0)
+
+        view = pdk.ViewState(
+            latitude=float(df_pts["lat"].median()),
+            longitude=float(df_pts["lon"].median()),
+            zoom=4.3,
+            pitch=50,
+        )
+
+        # Grid cells (3D extruded)
+        cell_size_m = 55_000  # ~0.5° at equator
+        elevation_scale = 4000.0  # tune for visibility
+        layer_cells = pdk.Layer(
+            "GridCellLayer",
+            data=df_pts,
+            get_position=["lon", "lat"],
+            get_elevation="value",
+            elevation_scale=elevation_scale,
+            cell_size=cell_size_m,
+            extruded=True,
+            pickable=True,
+            get_fill_color="color",
+        )
+
+        # Tail-risk flags (red dots overlaid)
+        flagged = df_pts[df_pts["tail_flag"]].copy()
+        layer_flags = pdk.Layer(
+            "ScatterplotLayer",
+            data=flagged,
+            get_position=["lon", "lat"],
+            get_radius=45_000,
+            get_fill_color=[230, 30, 30, 190],
+            pickable=True,
+        )
+
+        tooltip = {
+            "text": (
+                "Lon: {lon}\nLat: {lat}\n"
+                "Avoided damage potential: {value}\n"
+                "Tail-risk flagged: {tail_flag}\n"
+                "Nearest: {nearest_city} (~{nearest_km} km)"
+            )
+        }
+
+        deck = pdk.Deck(
+            layers=[layer_cells, layer_flags],
+            initial_view_state=view,
+            tooltip=tooltip,
+            map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+        )
+        st.pydeck_chart(deck, use_container_width=True)
+        st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
+    except Exception as e:
+        st.info(f"Interactive map unavailable ({e}). Showing static map below.")
 
 tail_risk_img = 'outputs/tail_risk_map.png'
 if os.path.exists(tail_risk_img):

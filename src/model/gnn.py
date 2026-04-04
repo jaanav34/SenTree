@@ -18,11 +18,11 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, BatchNorm
 
 
-class ClimateConditionedGAT(nn.Module):
-    """
-    Custom GAT layer that uses the Köppen-Geiger categorical prior (32-dim one-hot)
-    to condition the attention scores, acting as a low-pass filter for volatile signals.
-    """
+def _get_default_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class ClimateRiskGNN(nn.Module):
     def __init__(self, in_channels, out_channels, heads=4, dropout=0.15):
         super().__init__()
         self.gat = GATConv(in_channels, out_channels, heads=heads, 
@@ -134,6 +134,10 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
     Train with AdamW + cosine annealing + label smoothing.
     Uses Huber loss for robustness to outliers.
     """
+    device = _get_default_device()
+    model = model.to(device)
+    data = data.to(device)
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr,
                                    weight_decay=weight_decay)
     scheduler = None
@@ -142,7 +146,7 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
             optimizer, T_max=epochs, eta_min=lr * 0.01
         )
 
-    target = torch.tensor(target_scores, dtype=torch.float32)
+    target = torch.tensor(target_scores, dtype=torch.float32, device=device)
     target = (target - target.min()) / (target.max() - target.min() + 1e-8)
 
     # Label smoothing: prevent overconfident sigmoid outputs
@@ -188,10 +192,12 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
 
 def predict(model, data):
     """Run inference, return risk scores as numpy."""
+    device = next(model.parameters()).device
+    data = data.to(device)
     model.eval()
     with torch.no_grad():
         scores = model(data)
-    return scores.numpy()
+    return scores.detach().cpu().numpy()
 
 
 def predict_with_uncertainty(model, data, n_forward=20):
@@ -203,12 +209,14 @@ def predict_with_uncertainty(model, data, n_forward=20):
         mean_scores: (N,) — mean prediction
         std_scores: (N,) — standard deviation (uncertainty)
     """
+    device = next(model.parameters()).device
+    data = data.to(device)
     preds = []
     for _ in range(n_forward):
         model.train()  # keep dropout active
         with torch.no_grad():
             scores = model(data, mc_dropout=True)
-            preds.append(scores.numpy())
+            preds.append(scores.detach().cpu().numpy())
 
     preds = __import__('numpy').array(preds)  # (n_forward, N)
     model.eval()

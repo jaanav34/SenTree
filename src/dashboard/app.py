@@ -583,9 +583,17 @@ def _approx_cell_size_m(lats: np.ndarray, lons: np.ndarray) -> int:
     dlon = np.nanmedian(np.abs(np.diff(lons)))
     step_deg = float(np.nanmax([dlat, dlon]))
 
-    # 1° latitude ~= 111 km (good enough for UI sizing)
-    cell = int(round(111_000.0 * step_deg))
-    return int(np.clip(cell, 20_000, 350_000))
+    # deck.gl layers size cells in meters in WebMercator space. For global grids, the
+    # lon spacing (in meters) collapses near the poles by ~cos(latitude). If we use an
+    # equator-based meter size, high-latitude rows get binned/overlapped and look like
+    # "clustering bands" at ~±85°.
+    max_abs_lat = float(np.nanmax(np.abs(lats)))
+    cos_factor = float(np.cos(np.deg2rad(max_abs_lat)))
+    cos_factor = max(cos_factor, 1e-3)
+
+    # 1° latitude ~= 111 km (good enough for UI sizing); scale by polar cos-factor.
+    cell = int(round(111_000.0 * step_deg * cos_factor * 0.85))
+    return int(np.clip(cell, 5_000, 350_000))
 
 
 @st.cache_data
@@ -1173,7 +1181,7 @@ if opportunity is not None:
             "ScatterplotLayer",
             data=flagged,
             get_position=["lon", "lat"],
-            get_radius=max(20_000, int(round(0.8 * cell_size_m))),
+            get_radius=max(10_000, int(round(0.45 * cell_size_m))),
             get_fill_color=[230, 30, 30, 190],
             pickable=True,
         )

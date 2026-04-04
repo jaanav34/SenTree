@@ -117,6 +117,14 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     return R * c
 
 
+def _wrap_lon_180(lon):
+    """Normalize longitude to [-180, 180] for WebMercator map renderers (pydeck/mapbox)."""
+    lon = np.asarray(lon, dtype=np.float64)
+    lon = np.where(lon > 180.0, lon - 360.0, lon)
+    lon = np.where(lon < -180.0, lon + 360.0, lon)
+    return lon
+
+
 @st.cache_data
 def _opportunity_points(opportunity):
     """Flatten grids into a dataframe with nearest-city labels (offline)."""
@@ -127,7 +135,7 @@ def _opportunity_points(opportunity):
 
     lat_grid, lon_grid = np.meshgrid(lats, lons, indexing="ij")
     lat_flat = lat_grid.flatten()
-    lon_flat = lon_grid.flatten()
+    lon_flat = _wrap_lon_180(lon_grid.flatten())
     values = value_grid.flatten()
     flags = flags_grid.flatten()
 
@@ -377,8 +385,8 @@ if opportunity is not None:
             df_pts = df_pts.sample(max_points, random_state=0)
 
         view = pdk.ViewState(
-            latitude=float(df_pts["lat"].mean()),
-            longitude=float(df_pts["lon"].mean()),
+            latitude=float(df_pts["lat"].median()),
+            longitude=float(df_pts["lon"].median()),
             zoom=4.3,
             pitch=50,
         )

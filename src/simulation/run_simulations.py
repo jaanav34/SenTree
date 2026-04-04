@@ -17,7 +17,7 @@ _F = {
 }
 
 
-def apply_intervention(features, positions, intervention, lons, *, scaler=None):
+def apply_intervention(features, positions, intervention, lons, *, scaler=None, strength: float = 1.0):
     """
     Apply intervention deltas to raw feature matrix.
 
@@ -31,51 +31,60 @@ def apply_intervention(features, positions, intervention, lons, *, scaler=None):
     Returns:
         modified_features: (N, F) — scaled if scaler provided
     """
+    if strength <= 0:
+        raise ValueError("strength must be > 0")
+
     modified = features.copy()
     deltas = intervention['deltas']
 
     # Determine affected nodes
     if deltas.get('coastal_only', False):
-        threshold = deltas.get('coastal_lon_threshold', 120)
-        mask = positions[:, 1] >= threshold
+        # Prefer a coastal-factor based mask (works globally) when available,
+        # otherwise fall back to a longitude threshold (legacy / SE Asia demo).
+        cf_thresh = deltas.get("coastal_factor_threshold", None)
+        if cf_thresh is not None:
+            mask = modified[:, _F["coastal"]] >= float(cf_thresh)
+        else:
+            threshold = deltas.get('coastal_lon_threshold', 120)
+            mask = positions[:, 1] >= threshold
     else:
         mask = np.ones(len(features), dtype=bool)
 
     # Temperature reduction (degrees C)
-    temp_delta = deltas.get('temp_reduction', 0)
+    temp_delta = deltas.get('temp_reduction', 0) * strength
     modified[mask, _F['temp']] -= temp_delta
 
     # Precipitation reduction (mm/day)
-    precip_delta = deltas.get('precip_reduction', 0)
+    precip_delta = deltas.get('precip_reduction', 0) * strength
     modified[mask, _F['precip']] -= precip_delta
 
     # Temperature volatility reduction (fractional)
-    temp_vol_reduction = deltas.get('temp_volatility_reduction', 0)
-    modified[mask, _F['temp_vol']] *= (1 - temp_vol_reduction)
+    temp_vol_reduction = deltas.get('temp_volatility_reduction', 0) * strength
+    modified[mask, _F['temp_vol']] *= np.clip(1 - temp_vol_reduction, 0.0, 1.0)
 
     # Temperature momentum reduction (fractional)
-    temp_mom_reduction = deltas.get('temp_momentum_reduction', 0)
-    modified[mask, _F['temp_mom']] *= (1 - temp_mom_reduction)
+    temp_mom_reduction = deltas.get('temp_momentum_reduction', 0) * strength
+    modified[mask, _F['temp_mom']] *= np.clip(1 - temp_mom_reduction, 0.0, 1.0)
 
     # Precipitation volatility reduction (fractional)
-    precip_vol_reduction = deltas.get('precip_volatility_reduction', 0)
-    modified[mask, _F['precip_vol']] *= (1 - precip_vol_reduction)
+    precip_vol_reduction = deltas.get('precip_volatility_reduction', 0) * strength
+    modified[mask, _F['precip_vol']] *= np.clip(1 - precip_vol_reduction, 0.0, 1.0)
 
     # Precipitation momentum reduction (fractional)
-    precip_mom_reduction = deltas.get('precip_momentum_reduction', 0)
-    modified[mask, _F['precip_mom']] *= (1 - precip_mom_reduction)
+    precip_mom_reduction = deltas.get('precip_momentum_reduction', 0) * strength
+    modified[mask, _F['precip_mom']] *= np.clip(1 - precip_mom_reduction, 0.0, 1.0)
 
     # GDP boost (multiplicative)
-    gdp_factor = deltas.get('gdp_boost_factor', 1.0)
+    gdp_factor = 1.0 + (deltas.get('gdp_boost_factor', 1.0) - 1.0) * strength
     modified[mask, _F['gdp']] *= gdp_factor
 
     # Soil moisture improvement (additive)
-    soil_boost = deltas.get('soil_moisture_boost', 0)
+    soil_boost = deltas.get('soil_moisture_boost', 0) * strength
     modified[mask, _F['soil']] = np.clip(modified[mask, _F['soil']] + soil_boost, 0, 1)
 
     # Tail-risk score reduction (the intervention directly lowers local risk)
-    tail_risk_reduction = deltas.get('tail_risk_reduction', 0)
-    modified[mask, _F['tail_risk']] *= (1 - tail_risk_reduction)
+    tail_risk_reduction = deltas.get('tail_risk_reduction', 0) * strength
+    modified[mask, _F['tail_risk']] *= np.clip(1 - tail_risk_reduction, 0.0, 1.0)
 
     if scaler is not None:
         return scaler.transform(modified).astype(np.float32)

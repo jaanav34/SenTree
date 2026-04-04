@@ -20,14 +20,34 @@ import pickle
 import numpy as np
 
 
-# SE Asia coastal bounding box
+# Default SE Asia coastal bounding box
 LAT_MIN, LAT_MAX = -10.0, 25.0
 LON_MIN, LON_MAX = 90.0, 130.0
 
 
-def load_climate_data(data_dir='data/processed', raw_dir='data/raw'):
-    """Load processed climate data. Try real ISIMIP, fall back to synthetic."""
-    pkl_path = os.path.join(data_dir, 'climate_data.pkl')
+def load_climate_data(
+    data_dir: str = "data/processed",
+    raw_dir: str = "data/raw",
+    *,
+    region: str = "se_asia",
+    coarsen: int = 1,
+):
+    """
+    Load processed climate data. Try real ISIMIP, fall back to synthetic.
+
+    Args:
+        data_dir: output directory for cached pickle
+        raw_dir: directory containing ISIMIP NetCDFs
+        region: "se_asia" (default) or "global"
+        coarsen: integer factor to coarsen lat/lon (>=1). Use 2/4 for faster global runs.
+    """
+    if region not in {"se_asia", "global"}:
+        raise ValueError(f"Unknown region: {region} (expected 'se_asia' or 'global')")
+    if coarsen < 1:
+        raise ValueError("coarsen must be >= 1")
+
+    cache_name = f"climate_data_{region}_c{int(coarsen)}.pkl"
+    pkl_path = os.path.join(data_dir, cache_name)
 
     if os.path.exists(pkl_path):
         with open(pkl_path, 'rb') as f:
@@ -42,7 +62,7 @@ def load_climate_data(data_dir='data/processed', raw_dir='data/raw'):
         print(f"  Found {len(tas_files)} ISIMIP tas NetCDF files in {raw_dir}")
         if pr_files:
             print(f"  Found {len(pr_files)} ISIMIP pr NetCDF files in {raw_dir}")
-        return _load_from_netcdf(tas_files, pr_files, data_dir)
+        return _load_from_netcdf(tas_files, pr_files, data_dir, region=region, coarsen=coarsen)
 
     # Also check parent directory (cluster layout: ../data/raw)
     alt_raw = os.path.join(os.path.dirname(raw_dir), '..', 'data', 'raw')
@@ -52,7 +72,7 @@ def load_climate_data(data_dir='data/processed', raw_dir='data/raw'):
         print(f"  Found {len(tas_files)} ISIMIP tas NetCDF files in {alt_raw}")
         if pr_files:
             print(f"  Found {len(pr_files)} ISIMIP pr NetCDF files in {alt_raw}")
-        return _load_from_netcdf(tas_files, pr_files, data_dir)
+        return _load_from_netcdf(tas_files, pr_files, data_dir, region=region, coarsen=coarsen)
 
     # Fall back to synthetic
     print("  WARNING: No ISIMIP data found. Generating synthetic data.")
@@ -75,10 +95,10 @@ def _find_isimip_files(raw_dir, *, var: str):
     return sorted(set(files))
 
 
-def _load_from_netcdf(tas_files, pr_files, out_dir):
+def _load_from_netcdf(tas_files, pr_files, out_dir, *, region: str, coarsen: int):
     """
     Load ISIMIP3b daily NetCDF files for tas (and optionally pr), concatenate,
-    resample to annual means, subset to SE Asia.
+    resample to annual means, and optionally subset/coarsen.
     """
     import xarray as xr
 
@@ -119,23 +139,24 @@ def _load_from_netcdf(tas_files, pr_files, out_dir):
     print(f"  Raw shape: {dict(tas_raw.sizes)}")
     print(f"  Time range: {str(tas_raw.time.values[0])[:10]} to {str(tas_raw.time.values[-1])[:10]}")
 
-    # Subset to SE Asia
-    # ISIMIP lat is DESCENDING (89.75, 89.25, ..., -89.75), so we need
-    # to handle the slice direction correctly
+    # ISIMIP lat is often DESCENDING (89.75, 89.25, ..., -89.75), so we need
+    # to handle slice direction correctly when slicing.
     lat_vals = tas_raw.lat.values
-    if lat_vals[0] > lat_vals[-1]:
-        # Descending lat: slice(max, min)
-        tas_subset = tas_raw.sel(
-            lat=slice(LAT_MAX, LAT_MIN),
-            lon=slice(LON_MIN, LON_MAX),
-        )
-    else:
-        tas_subset = tas_raw.sel(
-            lat=slice(LAT_MIN, LAT_MAX),
-            lon=slice(LON_MIN, LON_MAX),
-        )
 
-    print(f"  SE Asia subset (tas): {dict(tas_subset.sizes)}")
+    if region == "se_asia":
+        if lat_vals[0] > lat_vals[-1]:
+            # Descending lat: slice(max, min)
+            tas_subset = tas_raw.sel(lat=slice(LAT_MAX, LAT_MIN), lon=slice(LON_MIN, LON_MAX))
+        else:
+            tas_subset = tas_raw.sel(lat=slice(LAT_MIN, LAT_MAX), lon=slice(LON_MIN, LON_MAX))
+        print(f"  SE Asia subset (tas): {dict(tas_subset.sizes)}")
+    else:
+        tas_subset = tas_raw
+        print(f"  Global (tas): {dict(tas_subset.sizes)}")
+
+    if coarsen > 1:
+        print(f"  Coarsening tas by factor {coarsen} (lat/lon)...")
+        tas_subset = tas_subset.coarsen(lat=coarsen, lon=coarsen, boundary='trim').mean()
 
     # Resample daily -> annual mean
     print("  Resampling daily -> annual mean (tas)...")
@@ -169,12 +190,20 @@ def _load_from_netcdf(tas_files, pr_files, out_dir):
     if pr_files:
         ds_pr, pr_raw = _open_var(pr_files, "pr")
 
-        # Subset to SE Asia (match the tas lat slice direction)
-        pr_subset = pr_raw.sel(
-            lat=slice(LAT_MAX, LAT_MIN) if lat_vals[0] > lat_vals[-1] else slice(LAT_MIN, LAT_MAX),
-            lon=slice(LON_MIN, LON_MAX),
-        )
-        print(f"  SE Asia subset (pr): {dict(pr_subset.sizes)}")
+        if region == "se_asia":
+            # Subset to SE Asia (match the tas lat slice direction)
+            pr_subset = pr_raw.sel(
+                lat=slice(LAT_MAX, LAT_MIN) if lat_vals[0] > lat_vals[-1] else slice(LAT_MIN, LAT_MAX),
+                lon=slice(LON_MIN, LON_MAX),
+            )
+            print(f"  SE Asia subset (pr): {dict(pr_subset.sizes)}")
+        else:
+            pr_subset = pr_raw
+            print(f"  Global (pr): {dict(pr_subset.sizes)}")
+
+        if coarsen > 1:
+            print(f"  Coarsening pr by factor {coarsen} (lat/lon)...")
+            pr_subset = pr_subset.coarsen(lat=coarsen, lon=coarsen, boundary='trim').mean()
 
         print("  Resampling daily -> annual mean (pr)...")
         pr_annual = pr_subset.resample(time='1YE').mean()
@@ -216,7 +245,7 @@ def _load_from_netcdf(tas_files, pr_files, out_dir):
         print("  No pr NetCDF files found; generating synthetic precipitation...")
         pr = _synthesize_precipitation(tas_values, lats, lons, years).astype(np.float32)
 
-    # GDP and population (gridded proxies for SE Asia)
+    # GDP and population (gridded proxies)
     gdp, pop, soil_moisture, coastal_factor = _generate_socioeconomic(lats, lons)
 
     data = {
@@ -232,7 +261,8 @@ def _load_from_netcdf(tas_files, pr_files, out_dir):
     }
 
     os.makedirs(out_dir, exist_ok=True)
-    pkl_path = os.path.join(out_dir, 'climate_data.pkl')
+    cache_name = f"climate_data_{region}_c{int(coarsen)}.pkl"
+    pkl_path = os.path.join(out_dir, cache_name)
     with open(pkl_path, 'wb') as f:
         pickle.dump(data, f)
     print(f"  Saved processed data to {pkl_path}")

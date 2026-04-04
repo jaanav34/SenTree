@@ -260,31 +260,49 @@ def render_tail_risk_video(risk_series, flags_series, lats, lons, output_path,
     return output_path
 
 
-def render_tail_risk_map(risk_grid, flags_grid, lats, lons, output_path,
+def render_tail_risk_map(value_grid, flags_grid, lats, lons, output_path,
+                        title='Resilience Opportunity Map', label='ROI Potential (Risk Reduction)',
                         scale_factor=8):
-    """Save a static heatmap of tail risk with flagged nodes."""
-    fig, ax = plt.subplots(figsize=(12, 7))
+    """Save a coordinate-accurate map highlighting ROI potential and target nodes."""
+    fig, ax = plt.subplots(figsize=(14, 8))
     extent = [lons[0], lons[-1], lats[0], lats[-1]]
 
-    hires = downscale_grid(risk_grid, scale_factor=scale_factor)
-    im = ax.imshow(hires, cmap='YlOrRd', origin='lower',
+    # Background: Resilience Opportunity (Green = high reduction potential)
+    hires = downscale_grid(value_grid, scale_factor=scale_factor)
+    im = ax.imshow(hires, cmap='Greens', origin='lower',
                    extent=extent, aspect='auto')
+
+    # Add Coordinate Grid for exact location identification
+    ax.grid(True, linestyle='--', alpha=0.4, color='gray')
+    ax.set_xticks(np.linspace(lons[0], lons[-1], 10))
+    ax.set_yticks(np.linspace(lats[0], lats[-1], 10))
 
     lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
     lat_flat, lon_flat = lat_grid.flatten(), lon_grid.flatten()
     flagged = flags_grid.flatten()
 
+    # Scatter: Target high-risk nodes (X marks the spot for highest ROI)
     ax.scatter(lon_flat[flagged], lat_flat[flagged],
-               c='red', s=40, marker='X', label='Tail-Risk Node', alpha=0.7)
+               c='red', s=70, marker='X', label='High-Risk / High-ROI Target', 
+               edgecolors='white', linewidths=0.5, zorder=5)
 
-    ax.set_title('Tail-Risk Escalation Map (Latest Timestep)')
-    ax.set_xlabel('Longitude')
-    ax.set_ylabel('Latitude')
-    ax.legend(loc='upper left')
-    plt.colorbar(im, ax=ax, label='Risk Score')
+    # Precise Coordinate Annotation for Top 3 ROI Nodes
+    top_indices = np.argsort(value_grid.flatten())[-3:]
+    for idx in top_indices:
+        ax.annotate(f"Target: ({lon_flat[idx]:.2f}E, {lat_flat[idx]:.2f}N)",
+                    (lon_flat[idx], lat_flat[idx]),
+                    textcoords="offset points", xytext=(10,10), 
+                    ha='left', fontsize=9, color='darkred', fontweight='bold',
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.7))
+
+    ax.set_title(title, fontsize=16, fontweight='bold')
+    ax.set_xlabel('Longitude (°E)')
+    ax.set_ylabel('Latitude (°N)')
+    ax.legend(loc='upper right', frameon=True, shadow=True)
+    plt.colorbar(im, ax=ax, label=label)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
-    print(f"Saved tail-risk map: {output_path}")
+    print(f"✅ Success: Resilience Opportunity Map saved to {output_path}")
     return output_path

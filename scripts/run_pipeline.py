@@ -162,9 +162,32 @@ render_risk_video(baseline_risk_series, data['lats'], data['lons'],
 render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
                        'outputs/videos/tail_risk_escalation.mp4')
 
-print("  Generating static tail-risk map...")
-render_tail_risk_map(baseline_risk_series[-1], flags_series[-1], data['lats'], data['lons'],
-                     'outputs/tail_risk_map.png')
+print("  Generating Strategic Resilience Opportunity Map...")
+# Logic: Map the DELTA (Baseline - Intervention) to show where value is created
+# We aggregate reduction across all interventions to find the 'Value hotspots'
+total_reduction_map = np.zeros((nlat, nlon))
+
+for key in sim_results:
+    # Get the 2D reduction potential for this intervention
+    reduction = (sim_results[key]['baseline_risk'] - sim_results[key]['intervention_risk']).reshape(nlat, nlon)
+    total_reduction_map += reduction
+
+render_tail_risk_map(
+    total_reduction_map, 
+    flags_series[-1], 
+    data['lats'], 
+    data['lons'],
+    'outputs/tail_risk_map.png',
+    title='Strategic Resilience Opportunity & ROI Target Map',
+    label='Total Avoided Damage Potential (Risk Reduction)'
+)
+
+# PRINT COORDINATES TO CLI FOR IMMEDIATE ACTION
+flagged_lats = data['lats'].repeat(nlon)[flags_series[-1].flatten()]
+flagged_lons = np.tile(data['lons'], nlat)[flags_series[-1].flatten()]
+print(f"\n🚀 HIGH-ROI TARGET LOCATIONS (Top 5 Priority Nodes):")
+for i in range(min(5, len(flagged_lats))):
+    print(f"  - Coordinate: {flagged_lons[i]:.2f}E, {flagged_lats[i]:.2f}N")
 
 for key in INTERVENTIONS:
     name = INTERVENTIONS[key]['name']

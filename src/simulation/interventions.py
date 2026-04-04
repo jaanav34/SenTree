@@ -29,6 +29,8 @@ INTERVENTIONS = {
             'soil_moisture_boost': 0.10,           # mangrove root systems
             'tail_risk_reduction': 0.30,           # 30% — direct tail-risk mitigation
             'coastal_only': True,
+            # Prefer coastal-factor mask when available; fallback lon threshold kept for demo.
+            'coastal_factor_threshold': 0.60,
             'coastal_lon_threshold': 120,
         },
         'description': 'Mangrove buffer reduces storm surge and precipitation volatility along coastlines',

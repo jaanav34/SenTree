@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+from pathlib import Path
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, ROOT_DIR)
@@ -15,6 +16,15 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
+
+
+def _show_video(path_or_url: str) -> None:
+    """Render a video from a local path (cluster filesystem) or a URL."""
+    p = Path(path_or_url)
+    if p.exists():
+        st.video(p.read_bytes(), format="video/mp4")
+        return
+    st.video(path_or_url)
 
 # --- Header ---
 st.title('SenTree: Resilience ROI Dashboard')
@@ -197,7 +207,7 @@ if search_btn and query:
                 with st.expander(f'Result {i+1}: {metadata.get("title", vid_id)} — Relevance: {similarity:.1%}', expanded=(i == 0)):
                     video_path = metadata.get('video_path', f'outputs/videos/{vid_id}.mp4')
                     if os.path.exists(video_path):
-                        st.video(video_path)
+                        _show_video(video_path)
 
                     c1, c2, c3 = st.columns(3)
                     roi_key = metadata.get('intervention_key', '')
@@ -242,7 +252,7 @@ if os.path.exists(video_dir):
         tabs = st.tabs([v.replace('.mp4', '').replace('_', ' ').title() for v in videos])
         for tab, vid in zip(tabs, videos):
             with tab:
-                st.video(os.path.join(video_dir, vid))
+                _show_video(os.path.join(video_dir, vid))
     else:
         st.info('No videos generated yet. Run `python scripts/run_pipeline.py`.')
 else:

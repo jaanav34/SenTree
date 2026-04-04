@@ -57,6 +57,12 @@ VIDEO_META = {
         'intervention_key': 'regenerative_agriculture',
         'has_tail_risk': False,
     },
+    'climate_classification_shift': {
+        'title': 'Köppen-Geiger Climate Classification Shifts',
+        'description': 'Evolution of Köppen-Geiger climate zones over time, showing how regions transition (e.g., from Tropical Savanna to Tropical Monsoon) alongside increasing baseline risk',
+        'intervention_key': '',
+        'has_tail_risk': False,
+    },
 }
 
 print("Indexing videos into ChromaDB...")

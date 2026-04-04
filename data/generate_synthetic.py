@@ -66,19 +66,28 @@ def generate_synthetic_data(out_dir='data/processed'):
     ipo_cycle = 0.15 * np.sin(2 * np.pi * (years - 2015) / 20)
 
     tas = np.zeros((n_years, n_lats, n_lons), dtype=np.float32)
+    tas_monthly = np.zeros((n_years, 12, n_lats, n_lons), dtype=np.float32)
+    
     for t in range(n_years):
-        tas[t] = (
+        # Base annual temperature
+        tas_base_year = (
             temp_base_field +
             temp_trend[t] * (1 + 0.3 * coastal_factor) +
             enso_cycle[t] * (1 + 0.5 * coastal_factor) +
             ipo_cycle[t] +
-            elevation_proxy * (-2) +
-            np.random.normal(0, 0.3, (n_lats, n_lons))
-        ).astype(np.float32)
-        corr_noise = gaussian_filter(
-            np.random.normal(0, 0.4, (n_lats, n_lons)), sigma=3
-        ).astype(np.float32)
-        tas[t] += corr_noise
+            elevation_proxy * (-2)
+        )
+        
+        # Monthly oscillation (peak in Jul, trough in Jan for tropics)
+        for m in range(12):
+            seasonal_amp = 4.0 * np.abs(lat_grid) / 25.0 + 1.5 # higher amp at higher lat
+            seasonal_cycle = seasonal_amp * np.sin(2 * np.pi * (m - 3) / 12)
+            
+            tas_m = tas_base_year + seasonal_cycle + np.random.normal(0, 0.4, (n_lats, n_lons))
+            tas_m = gaussian_filter(tas_m, sigma=2.0).astype(np.float32)
+            tas_monthly[t, m] = tas_m
+            
+        tas[t] = np.mean(tas_monthly[t], axis=0)
 
     print(f"  Temperature: {tas.min():.1f} to {tas.max():.1f} °C")
 
@@ -86,30 +95,24 @@ def generate_synthetic_data(out_dir='data/processed'):
     pr_base = 6.0 + 3.0 * coastal_factor + 1.5 * np.cos(np.radians(lat_grid) * 2)
 
     pr = np.zeros((n_years, n_lats, n_lons), dtype=np.float32)
+    pr_monthly = np.zeros((n_years, 12, n_lats, n_lons), dtype=np.float32)
+    
     for t in range(n_years):
         cc_scaling = 1.0 + 0.07 * temp_trend[t]
         monsoon_mod = 1.0 + 0.15 * enso_cycle[t]
-        var_scale = 1.0 + 0.015 * t  # slower increase over 86 years
-
-        pr[t] = (
-            pr_base * monsoon_mod * cc_scaling +
-            np.random.normal(0, 1.2 * var_scale, (n_lats, n_lons))
-        ).astype(np.float32)
-        corr_rain = gaussian_filter(
-            np.random.normal(0, 1.5 * var_scale, (n_lats, n_lons)), sigma=5
-        ).astype(np.float32)
-        pr[t] += corr_rain
-
-        # Extreme events
-        if np.random.random() < 0.15:
-            cx = np.random.randint(5, n_lats - 5)
-            cy = np.random.randint(5, n_lons - 5)
-            extreme = np.zeros((n_lats, n_lons), dtype=np.float32)
-            extreme[cx-3:cx+3, cy-3:cy+3] = np.random.uniform(3, 8)
-            extreme = gaussian_filter(extreme, sigma=2).astype(np.float32)
-            pr[t] += extreme
-
-        pr[t] = np.clip(pr[t], 0.01, 30)
+        var_scale = 1.0 + 0.015 * t
+        
+        for m in range(12):
+            # Monsoon phase (peak Jun-Sep in NH, Dec-Mar in SH)
+            monsoon_phase = np.sin(np.pi * (m - 3) / 6) * np.sign(lat_grid)
+            seasonal_factor = 1.0 + 0.8 * monsoon_phase
+            
+            pr_m = pr_base * monsoon_mod * cc_scaling * seasonal_factor
+            pr_m += np.random.normal(0, 3.0 * var_scale, (n_lats, n_lons))
+            pr_m = gaussian_filter(np.clip(pr_m, 0.05, 50.0), sigma=1.5).astype(np.float32)
+            pr_monthly[t, m] = pr_m
+            
+        pr[t] = np.mean(pr_monthly[t], axis=0)
 
     print(f"  Precipitation: {pr.min():.1f} to {pr.max():.1f} mm/day")
 
@@ -143,7 +146,9 @@ def generate_synthetic_data(out_dir='data/processed'):
     # --- Save ---
     data = {
         'tas': tas,
+        'tas_monthly': tas_monthly,
         'pr': pr,
+        'pr_monthly': pr_monthly,
         'gdp': gdp,
         'pop': pop,
         'soil_moisture': soil_moisture,

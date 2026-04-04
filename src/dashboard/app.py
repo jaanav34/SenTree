@@ -171,11 +171,21 @@ with math_tab:
     Volatility measures the stability of the signal:
     $$v(t) = \\sqrt{\\frac{1}{w} \sum_{i=t-w+1}^{t} [m(i) - \\bar{m}_w]^2}$$
     
-    **D. Hawkes Self-Excitation:**
+    D. Hawkes Self-Excitation:
     To capture "clusters" of extreme events, we add a Hawkes process intensity:
     $$\lambda^*(t) = \mu + \sum_{t_i < t} \\beta e^{-\gamma(t - t_i)}$$
     Nodes exceeding the 95th percentile of the composite score are flagged as **Tail-Risk Escalation** zones.
+
+    **E. Köppen-Geiger Climate Classification:**
+    We model climate shifts by classifying each node annually based on monthly temperature and precipitation thresholds. 
+    Groups include:
+    *   **Group A (Tropical):** $T_{min} \ge 18^\circ C$
+    *   **Group B (Dry):** $P_{ann} < 10 \times P_{thresh}$
+    *   **Group C (Temperate):** $0^\circ C < T_{min} < 18^\circ C$
+    *   **Group D (Continental):** $T_{min} \le 0^\circ C$
+    *   **Group E (Polar):** $T_{max} < 10^\circ C$
     """)
+
     
     st.subheader('2. Resilience ROI & Economic Exposure (Ito 2020)')
     st.markdown("""

@@ -101,13 +101,18 @@ def _load_from_netcdf(nc_files, out_dir):
 
     print(f"  SE Asia subset: {dict(tas_subset.sizes)}")
 
+    # Resample daily -> monthly mean
+    print("  Resampling daily -> monthly mean...")
+    tas_monthly = tas_subset.resample(time='1MS').mean()
+    
     # Resample daily -> annual mean
     print("  Resampling daily -> annual mean...")
     tas_annual = tas_subset.resample(time='1YE').mean()
 
     # Load into memory and convert K -> °C
     print("  Loading into memory & converting K -> °C...")
-    tas_values = tas_annual.values - 273.15  # K -> °C
+    tas_annual_values = tas_annual.values - 273.15
+    tas_monthly_values = tas_monthly.values - 273.15
 
     # Get coordinates
     lats = tas_annual.lat.values.astype(np.float64)
@@ -116,30 +121,34 @@ def _load_from_netcdf(nc_files, out_dir):
     # Ensure lat is ascending (for consistent plotting with origin='lower')
     if lats[0] > lats[-1]:
         lats = lats[::-1]
-        tas_values = tas_values[:, ::-1, :]
+        tas_annual_values = tas_annual_values[:, ::-1, :]
+        tas_monthly_values = tas_monthly_values[:, :, ::-1, :]
 
     # Extract years from the time coordinate
     years = np.array([int(str(t)[:4]) for t in tas_annual.time.values])
+    T_years = len(years)
 
-    print(f"  Annual data: {tas_values.shape} — {len(years)} years")
-    print(f"  Years: {years[0]} to {years[-1]}")
-    print(f"  Lats: {lats[0]:.2f} to {lats[-1]:.2f} ({len(lats)} points)")
-    print(f"  Lons: {lons[0]:.2f} to {lons[-1]:.2f} ({len(lons)} points)")
-    print(f"  Temp range: {tas_values.min():.1f} to {tas_values.max():.1f} °C")
-
+    # Reshape monthly values to (T_years, 12, nlat, nlon)
+    # Note: This assumes complete years in the dataset
     nlat, nlon = len(lats), len(lons)
+    tas_monthly_values = tas_monthly_values[:T_years*12].reshape(T_years, 12, nlat, nlon)
+
+    print(f"  Annual data: {tas_annual_values.shape} — {len(years)} years")
+    print(f"  Monthly data: {tas_monthly_values.shape}")
 
     # We don't have pr (precipitation) in the downloaded files — synthesize it
-    # based on temperature with realistic climate relationships
-    print("  Generating synthetic precipitation (pr not in downloaded files)...")
-    pr = _synthesize_precipitation(tas_values, lats, lons, years)
+    print("  Generating synthetic precipitation (monthly + annual)...")
+    pr_monthly = _synthesize_monthly_precipitation(tas_monthly_values, lats, lons, years)
+    pr_annual = np.mean(pr_monthly, axis=1) # (T, nlat, nlon)
 
     # GDP and population (gridded proxies for SE Asia)
     gdp, pop, soil_moisture, coastal_factor = _generate_socioeconomic(lats, lons)
 
     data = {
-        'tas': tas_values.astype(np.float32),
-        'pr': pr.astype(np.float32),
+        'tas': tas_annual_values.astype(np.float32),
+        'tas_monthly': tas_monthly_values.astype(np.float32),
+        'pr': pr_annual.astype(np.float32),
+        'pr_monthly': pr_monthly.astype(np.float32),
         'gdp': gdp.astype(np.float32),
         'pop': pop.astype(np.float32),
         'soil_moisture': soil_moisture.astype(np.float32),
@@ -159,36 +168,45 @@ def _load_from_netcdf(nc_files, out_dir):
     return data
 
 
-def _synthesize_precipitation(tas, lats, lons, years):
+def _synthesize_monthly_precipitation(tas_monthly, lats, lons, years):
     """
-    Generate realistic precipitation from temperature using
-    Clausius-Clapeyron scaling and SE Asian monsoon patterns.
+    Generate realistic monthly precipitation from monthly temperature
+    incorporating SE Asian monsoon seasonality.
     """
     from scipy.ndimage import gaussian_filter
 
     np.random.seed(42)
-    T, nlat, nlon = tas.shape
-
+    T, M, nlat, nlon = tas_monthly.shape
     lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
 
-    # Base precipitation: higher in tropics and near coast
-    coastal_distance = (lon_grid.max() - lon_grid) / (lon_grid.max() - lon_grid.min())
+    # SE Asian Monsoon: peak in Jun-Sep (NH) or Nov-Feb (SH)
+    # We'll use a latitudinal shift for seasonality
+    month_idx = np.arange(12)
+    
+    # Coastal and tropical base
+    coastal_distance = (lon_grid.max() - lon_grid) / (lon_grid.max() - lon_grid.min() + 1e-8)
     coastal_factor = np.exp(-3 * coastal_distance)
-    pr_base = 6.0 + 3.0 * coastal_factor + 1.5 * np.cos(np.radians(lat_grid) * 2)
-
-    pr = np.zeros_like(tas)
+    
+    pr_monthly = np.zeros_like(tas_monthly)
+    
     for t in range(T):
-        # Clausius-Clapeyron: +7% per K above baseline
-        temp_anomaly = tas[t] - tas[0]
-        cc_scaling = 1.0 + 0.07 * np.clip(temp_anomaly, 0, 10)
-        var_scale = 1.0 + 0.02 * t
+        for m in range(12):
+            # Monsoon phase depends on latitude (NH peak in Jul, SH peak in Jan)
+            monsoon_phase = np.sin(np.pi * (m - 3) / 6) * np.sign(lat_grid)
+            seasonal_factor = 1.0 + 0.8 * monsoon_phase
+            
+            # Clausius-Clapeyron scaling relative to annual start
+            temp_anomaly = tas_monthly[t, m] - tas_monthly[0].mean(axis=0)
+            cc_scaling = 1.0 + 0.07 * np.clip(temp_anomaly, -10, 15)
+            
+            pr_m = (5.0 + 4.0 * coastal_factor) * seasonal_factor * cc_scaling
+            noise = np.random.normal(0, 2.0, (nlat, nlon))
+            pr_m = np.clip(pr_m + noise, 0.05, 50.0)
+            
+            # Spatial smoothing for realistic rain bands
+            pr_monthly[t, m] = gaussian_filter(pr_m, sigma=1.5)
 
-        pr[t] = pr_base * cc_scaling + np.random.normal(0, 1.2 * var_scale, (nlat, nlon))
-        corr_rain = gaussian_filter(np.random.normal(0, 1.0, (nlat, nlon)), sigma=3)
-        pr[t] += corr_rain
-        pr[t] = np.clip(pr[t], 0.01, 30)
-
-    return pr
+    return pr_monthly
 
 
 def _generate_socioeconomic(lats, lons):

@@ -18,6 +18,7 @@ from src.data.preprocess import (
     build_temporal_features,
     build_temporal_features_raw,
 )
+from src.data.koppen_geiger import classify_grid
 from src.tail_risk.engine import compute_tail_risk, compute_tail_risk_series, get_tail_risk_nodes
 from src.graph.build_graph import build_climate_graph
 from src.model.gnn import ClimateRiskGNN, train_gnn, predict
@@ -25,7 +26,7 @@ from src.simulation.interventions import INTERVENTIONS
 from src.simulation.run_simulations import run_all_simulations, apply_intervention
 from src.simulation.roi import compute_roi
 from src.rendering.render_video import (
-    render_risk_video, render_comparison_video, render_tail_risk_video, render_tail_risk_map
+    render_risk_video, render_comparison_video, render_tail_risk_video, render_tail_risk_map, render_kg_video
 )
 
 print("=" * 60)
@@ -158,6 +159,10 @@ with open("outputs/roi/risk_timeseries.json", "w") as f:
 print("  Computing per-timestep tail-risk flags...")
 _scores_series, flags_series, _regime_series = compute_tail_risk_series(data)
 
+# Köppen-Geiger climate classification series
+print("  Computing Köppen-Geiger climate classification series...")
+kg_series = classify_grid(data['tas_monthly'], data['pr_monthly'])
+
 # Render all videos (pass year_labels for correct annotation)
 year_labels = years
 
@@ -168,6 +173,10 @@ render_risk_video(baseline_risk_series, data['lats'], data['lons'],
 render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
                        'outputs/videos/tail_risk_escalation.mp4',
                        year_labels=year_labels)
+
+render_kg_video(kg_series, data['lats'], data['lons'],
+                'outputs/videos/climate_classification_shift.mp4',
+                year_labels=year_labels)
 
 print("  Generating Strategic Resilience Opportunity Map...")
 # Logic: Map the DELTA (Baseline - Intervention) to show where value is created

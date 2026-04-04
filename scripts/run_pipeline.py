@@ -25,7 +25,7 @@ from src.simulation.interventions import INTERVENTIONS
 from src.simulation.run_simulations import run_all_simulations, apply_intervention
 from src.simulation.roi import compute_roi
 from src.rendering.render_video import (
-    render_risk_video, render_comparison_video, render_tail_risk_video
+    render_risk_video, render_comparison_video, render_tail_risk_video, render_tail_risk_map
 )
 
 print("=" * 60)
@@ -161,6 +161,10 @@ render_risk_video(baseline_risk_series, data['lats'], data['lons'],
 
 render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
                        'outputs/videos/tail_risk_escalation.mp4')
+
+print("  Generating static tail-risk map...")
+render_tail_risk_map(baseline_risk_series[-1], flags_series[-1], data['lats'], data['lons'],
+                     'outputs/tail_risk_map.png')
 
 for key in INTERVENTIONS:
     name = INTERVENTIONS[key]['name']

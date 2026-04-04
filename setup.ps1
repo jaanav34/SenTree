@@ -62,7 +62,10 @@ function Resolve-Python {
   if ($py) {
     foreach ($ver in @("3.12", "3.13", "3.11", "3.10", "3")) {
       $flag = "-$ver"
-      & py $flag -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+      $LASTEXITCODE = 1
+      try {
+        & py $flag -c "pass" 2>$null
+      } catch { }
       if ($LASTEXITCODE -eq 0) {
         return @("py", $flag)
       }
@@ -79,7 +82,7 @@ if ($env:SENTREE_PYTHON) {
   $pyExe = $env:SENTREE_PYTHON
   $pyArgs = @()
 } else {
-  $pythonCmd = Resolve-Python
+  $pythonCmd = @(Resolve-Python)
   $pyExe = $pythonCmd[0]
   $pyArgs = @()
   if ($pythonCmd.Length -gt 1) { $pyArgs = @($pythonCmd[1]) }
@@ -157,7 +160,7 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -and -not $env:SENTR
 # PyG CPU extras install (best-effort)
 Write-Host "Installing PyG CPU extras (best-effort)..."
 try {
-  $pygUrl = (& $venvPython -c "import torch; v=torch.__version__.split('+')[0]; cuda=getattr(torch.version,'cuda',None); tag=(f'cu{cuda.replace(\".\",\"\")}' if cuda else 'cpu'); print(f'https://data.pyg.org/whl/torch-{v}+{tag}.html')").Trim()
+  $pygUrl = (& $venvPython -c "import torch; v=torch.__version__.split('+')[0]; cuda=getattr(torch.version,'cuda',None); tag='cu' + cuda.replace('.','') if cuda else 'cpu'; print('https://data.pyg.org/whl/torch-' + v + '+' + tag + '.html')").Trim()
   & $venvPython -m pip install --require-virtualenv --only-binary=:all: torch-scatter torch-sparse -f $pygUrl | Out-Host
 } catch {
   Write-Warning "PyG extras install failed - GCNConv may still work without them"

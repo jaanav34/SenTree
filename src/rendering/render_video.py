@@ -258,3 +258,33 @@ def render_tail_risk_video(risk_series, flags_series, lats, lons, output_path,
     plt.close(fig)
     print(f"Saved tail-risk video: {output_path}")
     return output_path
+
+
+def render_tail_risk_map(risk_grid, flags_grid, lats, lons, output_path,
+                        scale_factor=8):
+    """Save a static heatmap of tail risk with flagged nodes."""
+    fig, ax = plt.subplots(figsize=(12, 7))
+    extent = [lons[0], lons[-1], lats[0], lats[-1]]
+
+    hires = downscale_grid(risk_grid, scale_factor=scale_factor)
+    im = ax.imshow(hires, cmap='YlOrRd', origin='lower',
+                   extent=extent, aspect='auto')
+
+    lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
+    lat_flat, lon_flat = lat_grid.flatten(), lon_grid.flatten()
+    flagged = flags_grid.flatten()
+
+    ax.scatter(lon_flat[flagged], lat_flat[flagged],
+               c='red', s=40, marker='X', label='Tail-Risk Node', alpha=0.7)
+
+    ax.set_title('Tail-Risk Escalation Map (Latest Timestep)')
+    ax.set_xlabel('Longitude')
+    ax.set_ylabel('Latitude')
+    ax.legend(loc='upper left')
+    plt.colorbar(im, ax=ax, label='Risk Score')
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved tail-risk map: {output_path}")
+    return output_path

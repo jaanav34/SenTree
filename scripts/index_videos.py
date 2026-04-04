@@ -5,6 +5,10 @@ import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sentree_venv import ensure_venv
+
+ensure_venv()
+
 from src.embedding.embedder import embed_video
 from src.embedding.vectordb import VideoSearchDB
 

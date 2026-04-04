@@ -1,12 +1,18 @@
 """SenTree Dashboard — Streamlit UI."""
-import streamlit as st
-import pandas as pd
-import numpy as np
 import os
 import sys
 import json
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, ROOT_DIR)
+
+from sentree_venv import ensure_venv
+
+ensure_venv()
+
+import streamlit as st
+import pandas as pd
+import numpy as np
 
 st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
 

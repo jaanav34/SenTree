@@ -21,7 +21,7 @@ Direct download commands (use ISIMIP's download client or wget from their file l
 
 ```bash
 # Install ISIMIP client
-pip install isimip-client
+.venv/bin/python -m pip install --require-virtualenv isimip-client
 
 # Or manual wget from the ISIMIP data portal file listing:
 # Temperature (tas) — monthly, global, ~500MB per file
@@ -38,7 +38,7 @@ cd data/raw
 # wget https://files.isimip.org/ISIMIP3b/InputData/climate/atmosphere/bias-adjusted/global/monthly/ssp370/GFDL-ESM4/gfdl-esm4_r1i1p1f1_w5e5_ssp370_pr_global_monthly_2015_2020.nc
 
 # OPTION C (HACKATHON FAST-PATH): Use pre-subsetted ERA5/CDS data as stand-in
-# pip install cdsapi
+# .venv/bin/python -m pip install --require-virtualenv cdsapi
 # Use the CDS API to grab a small regional subset quickly
 ```
 
@@ -103,7 +103,7 @@ print(f"Generated synthetic data: {n_years} years, {n_lats}x{n_lons} grid = {n_l
 
 ```bash
 # World Bank API — GDP per capita for SE Asian countries
-# pip install wbgapi
+# .venv/bin/python -m pip install --require-virtualenv wbgapi
 python -c "
 import wbgapi as wb
 import pandas as pd

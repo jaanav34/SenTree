@@ -1,7 +1,15 @@
 """Generate synthetic ISIMIP-like climate data for hackathon use."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sentree_venv import ensure_venv
+
+ensure_venv()
+
 import numpy as np
 import pickle
-import os
 
 np.random.seed(42)
 

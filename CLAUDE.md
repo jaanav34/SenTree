@@ -32,10 +32,24 @@ src/dashboard/     → Streamlit app (search bar → video + ROI + risk flags)
 ## Key Commands
 
 ```bash
-pip install -r requirements.txt
+# Setup (mandatory venv)
+./setup.sh                       # macOS/Linux
+powershell -ExecutionPolicy Bypass -File .\\setup.ps1  # Windows
+
+# Run (use venv python)
+.venv/bin/python scripts/run_pipeline.py             # macOS/Linux
+.venv/bin/python scripts/index_videos.py             # macOS/Linux
+.venv/bin/python -m streamlit run src/dashboard/app.py  # macOS/Linux
+
+.\\.venv\\Scripts\\python.exe scripts\\run_pipeline.py   # Windows
+.\\.venv\\Scripts\\python.exe scripts\\index_videos.py   # Windows
+.\\.venv\\Scripts\\python.exe -m streamlit run src\\dashboard\\app.py  # Windows
+
+# System dependency
 apt install ffmpeg  # or brew install ffmpeg
-streamlit run src/dashboard/app.py
 ```
+
+Note: Repo entrypoints refuse to run outside a virtualenv. To bypass (not recommended), set `SENTREE_ALLOW_NO_VENV=1`.
 
 ## Team Split
 

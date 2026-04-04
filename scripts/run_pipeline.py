@@ -2,9 +2,14 @@
 import sys
 import os
 import json
-import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sentree_venv import ensure_venv
+
+ensure_venv()
+
+import numpy as np
 
 from src.data.load_isimip import load_climate_data
 from src.data.preprocess import build_node_features, build_temporal_features

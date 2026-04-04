@@ -73,7 +73,21 @@ print(f"  Nodes: {graph_data.num_nodes}, Edges: {graph_data.edge_index.shape[1]}
 print("\n[4/7] Training GNN...")
 model = ClimateRiskGNN(in_channels=n_features, hidden_channels=64)
 tail_scores_flat, _, _ = get_tail_risk_nodes(data)
-model = train_gnn(model, graph_data, tail_scores_flat, epochs=50)
+model, training_history = train_gnn(
+    model, graph_data, tail_scores_flat, epochs=50, return_history=True
+)
+
+os.makedirs('outputs/roi', exist_ok=True)
+np.savez_compressed(
+    'outputs/roi/gnn_training_history.npz',
+    positions=training_history['positions'],
+    edge_index=training_history['edge_index_sample'],
+    target=training_history['target'],
+    predictions=training_history['predictions'],
+    loss=training_history['loss'],
+    learning_rate=training_history['learning_rate'],
+)
+print("  Saved training history: outputs/roi/gnn_training_history.npz")
 
 # 5. Run simulations
 print("\n[5/7] Running simulations...")
@@ -106,7 +120,6 @@ for key, result in sim_results.items():
     print(f"    Uncertainty: U_precip={roi['u_precip']:.3f}, U_model={roi['u_model']:.3f}, U_scenario={roi['u_scenario']:.3f}")
     print(f"    FRA (Ito 2020): {roi['fra']:.3f}")
 
-os.makedirs('outputs/roi', exist_ok=True)
 with open('outputs/roi/roi_results.json', 'w') as f:
     json.dump(roi_results, f, indent=2, default=str)
 

@@ -18,7 +18,7 @@ from src.data.preprocess import (
     build_temporal_features,
     build_temporal_features_raw,
 )
-from src.tail_risk.engine import compute_tail_risk, get_tail_risk_nodes
+from src.tail_risk.engine import compute_tail_risk, compute_tail_risk_series, get_tail_risk_nodes
 from src.graph.build_graph import build_climate_graph
 from src.model.gnn import ClimateRiskGNN, train_gnn, predict
 from src.simulation.interventions import INTERVENTIONS
@@ -38,22 +38,28 @@ data = load_climate_data()
 print(f"  Shape: {data['tas'].shape} — {len(data['years'])} years, "
       f"{data['tas'].shape[1]}x{data['tas'].shape[2]} grid")
 
-# 2. Compute tail risk
+# 2. Compute tail risk (Gurjar & Camp 2026 + Hawkes process)
 print("\n[2/7] Computing tail-risk scores...")
-scores, flags, threshold = compute_tail_risk(data)
+scores, flags, threshold, regime, components = compute_tail_risk(data)
 print(f"  Threshold (95th pct): {threshold:.4f}")
 print(f"  Flagged nodes: {flags.sum()} / {flags.size}")
+n_baseline = int((regime == 0).sum())
+n_buildup = int((regime == 1).sum())
+n_surge = int((regime == 2).sum())
+print(f"  Regimes — Baseline: {n_baseline}, Buildup: {n_buildup}, Surge: {n_surge}")
 
 # 3. Build features + graph
 print("\n[3/7] Building graph...")
 features, positions, scaler = build_node_features(data, year_idx=-1)
 features_raw, _positions_raw = build_node_features_raw(data, year_idx=-1)
+n_features = features.shape[1]
+print(f"  Feature dimensions: {n_features}")
 graph_data = build_climate_graph(features, positions, k=8)
 print(f"  Nodes: {graph_data.num_nodes}, Edges: {graph_data.edge_index.shape[1]}")
 
-# 4. Train GNN
+# 4. Train GNN (upgraded GAT+GCN hybrid)
 print("\n[4/7] Training GNN...")
-model = ClimateRiskGNN(in_channels=features.shape[1])
+model = ClimateRiskGNN(in_channels=n_features, hidden_channels=64)
 tail_scores_flat, _, _ = get_tail_risk_nodes(data)
 model = train_gnn(model, graph_data, tail_scores_flat, epochs=50)
 
@@ -64,7 +70,7 @@ baseline_risk, sim_results = run_all_simulations(
     model, graph_data, features_raw, positions, INTERVENTIONS, lons, scaler=scaler
 )
 
-# 6. Compute ROI
+# 6. Compute ROI (with Ito 2020 ensemble uncertainty)
 print("\n[6/7] Computing ROI...")
 roi_results = {}
 for key, result in sim_results.items():
@@ -81,8 +87,12 @@ for key, result in sim_results.items():
             (result['intervention_risk'] <= np.percentile(result['baseline_risk'], 95))
         ).sum())
     }
-    print(f"  {result['name']}: ROI = {roi['roi']:.2f}x "
-          f"(range: {roi['roi_lower']:.2f} - {roi['roi_upper']:.2f})")
+    print(f"  {result['name']}:")
+    print(f"    ROI = {roi['roi']:.2f}x (range: {roi['roi_lower']:.2f} - {roi['roi_upper']:.2f})")
+    print(f"    Loss avoided: ${roi['total_loss_avoided']:,.0f}")
+    print(f"    Risk reduction: {roi['mean_risk_reduction']:.4f} (mean), {roi['max_risk_reduction']:.4f} (max)")
+    print(f"    Uncertainty: U_precip={roi['u_precip']:.3f}, U_model={roi['u_model']:.3f}, U_scenario={roi['u_scenario']:.3f}")
+    print(f"    FRA (Ito 2020): {roi['fra']:.3f}")
 
 os.makedirs('outputs/roi', exist_ok=True)
 with open('outputs/roi/roi_results.json', 'w') as f:
@@ -124,7 +134,7 @@ for t in range(T):
         i_risk = predict(model, mod_data)
         intervention_risk_series[key].append(i_risk.reshape(nlat, nlon))
 
-# Save quantitative time-series metrics (for debugging / analysis)
+# Save quantitative time-series metrics
 def _series_stats(series_2d):
     return {
         "mean": [float(x.mean()) for x in series_2d],
@@ -141,22 +151,11 @@ os.makedirs("outputs/roi", exist_ok=True)
 with open("outputs/roi/risk_timeseries.json", "w") as f:
     json.dump(risk_timeseries, f, indent=2)
 
-# Tail-risk flags per timestep
-from src.tail_risk.volatility import compute_volatility_series
-from src.tail_risk.momentum import compute_momentum_series
+# Tail-risk flags per timestep (using full Gurjar & Camp engine)
+print("  Computing per-timestep tail-risk flags...")
+_scores_series, flags_series, _regime_series = compute_tail_risk_series(data)
 
-vol_s = compute_volatility_series(data['tas'], 5)
-mom_s = compute_momentum_series(data['tas'], 3)
-
-flags_series = []
-for t in range(T):
-    def norm(x):
-        mn, mx = x.min(), x.max()
-        return (x - mn) / (mx - mn + 1e-8)
-    s = 0.6 * norm(vol_s[t]) + 0.4 * norm(mom_s[t])
-    flags_series.append(s >= np.percentile(s, 95))
-
-# Render
+# Render all videos
 render_risk_video(baseline_risk_series, data['lats'], data['lons'],
                   'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk')
 

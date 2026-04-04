@@ -4,55 +4,78 @@ import torch
 from torch_geometric.data import Data
 
 
+# Feature layout (src.data.preprocess, 11 features):
+# [0] temp            [1] precip          [2] temp_vol
+# [3] temp_mom        [4] precip_vol      [5] precip_mom
+# [6] gdp             [7] pop_norm        [8] soil_moisture
+# [9] coastal_factor  [10] tail_risk_score
+
+_F = {
+    'temp': 0, 'precip': 1, 'temp_vol': 2, 'temp_mom': 3,
+    'precip_vol': 4, 'precip_mom': 5, 'gdp': 6, 'pop': 7,
+    'soil': 8, 'coastal': 9, 'tail_risk': 10,
+}
+
+
 def apply_intervention(features, positions, intervention, lons, *, scaler=None):
     """
-    Apply intervention deltas to feature matrix.
+    Apply intervention deltas to raw feature matrix.
 
     Args:
-        features: (N, F) numpy array — raw features from preprocess
+        features: (N, 11) numpy array — raw features from preprocess
         positions: (N, 2) numpy array — [lat, lon]
         intervention: dict from interventions.py
         lons: original lon values for coastal detection
         scaler: optional StandardScaler; if provided, returns scaled features
 
     Returns:
-        modified_features: (N, F)
+        modified_features: (N, F) — scaled if scaler provided
     """
     modified = features.copy()
     deltas = intervention['deltas']
 
+    # Determine affected nodes
     if deltas.get('coastal_only', False):
         threshold = deltas.get('coastal_lon_threshold', 120)
         mask = positions[:, 1] >= threshold
     else:
         mask = np.ones(len(features), dtype=bool)
 
-    # Feature layout (see src.data.preprocess):
-    # [temp, precip, temp_vol, temp_mom, precip_vol, precip_mom, gdp]
-
-    # Temp reduction (feature index 0) — degrees C
+    # Temperature reduction (degrees C)
     temp_delta = deltas.get('temp_reduction', 0)
-    modified[mask, 0] -= temp_delta
+    modified[mask, _F['temp']] -= temp_delta
 
-    # Optional precip reduction (feature index 1) — mm/day (synthetic/demo)
-    precip_delta = deltas.get("precip_reduction", 0)
-    modified[mask, 1] -= precip_delta
+    # Precipitation reduction (mm/day)
+    precip_delta = deltas.get('precip_reduction', 0)
+    modified[mask, _F['precip']] -= precip_delta
 
-    # Precip volatility reduction (feature index 4)
-    vol_reduction = deltas.get('precip_volatility_reduction', 0)
-    modified[mask, 4] *= (1 - vol_reduction)
+    # Temperature volatility reduction (fractional)
+    temp_vol_reduction = deltas.get('temp_volatility_reduction', 0)
+    modified[mask, _F['temp_vol']] *= (1 - temp_vol_reduction)
 
-    # Optional temp volatility reduction (feature index 2)
-    temp_vol_reduction = deltas.get("temp_volatility_reduction", 0)
-    modified[mask, 2] *= (1 - temp_vol_reduction)
+    # Temperature momentum reduction (fractional)
+    temp_mom_reduction = deltas.get('temp_momentum_reduction', 0)
+    modified[mask, _F['temp_mom']] *= (1 - temp_mom_reduction)
 
-    # Optional precip momentum reduction (feature index 5)
-    precip_mom_reduction = deltas.get("precip_momentum_reduction", 0)
-    modified[mask, 5] *= (1 - precip_mom_reduction)
+    # Precipitation volatility reduction (fractional)
+    precip_vol_reduction = deltas.get('precip_volatility_reduction', 0)
+    modified[mask, _F['precip_vol']] *= (1 - precip_vol_reduction)
 
-    # GDP boost (feature index 6)
+    # Precipitation momentum reduction (fractional)
+    precip_mom_reduction = deltas.get('precip_momentum_reduction', 0)
+    modified[mask, _F['precip_mom']] *= (1 - precip_mom_reduction)
+
+    # GDP boost (multiplicative)
     gdp_factor = deltas.get('gdp_boost_factor', 1.0)
-    modified[mask, 6] *= gdp_factor
+    modified[mask, _F['gdp']] *= gdp_factor
+
+    # Soil moisture improvement (additive)
+    soil_boost = deltas.get('soil_moisture_boost', 0)
+    modified[mask, _F['soil']] = np.clip(modified[mask, _F['soil']] + soil_boost, 0, 1)
+
+    # Tail-risk score reduction (the intervention directly lowers local risk)
+    tail_risk_reduction = deltas.get('tail_risk_reduction', 0)
+    modified[mask, _F['tail_risk']] *= (1 - tail_risk_reduction)
 
     if scaler is not None:
         return scaler.transform(modified).astype(np.float32)

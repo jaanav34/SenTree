@@ -18,6 +18,7 @@ from src.data.preprocess import (
     build_temporal_features,
     build_temporal_features_raw,
 )
+from src.data.koppen_geiger import classify_grid
 from src.tail_risk.engine import compute_tail_risk, compute_tail_risk_series, get_tail_risk_nodes
 from src.graph.build_graph import build_climate_graph
 from src.model.gnn import ClimateRiskGNN, train_gnn, predict
@@ -25,7 +26,7 @@ from src.simulation.interventions import INTERVENTIONS
 from src.simulation.run_simulations import run_all_simulations, apply_intervention
 from src.simulation.roi import compute_roi
 from src.rendering.render_video import (
-    render_risk_video, render_comparison_video, render_tail_risk_video, render_tail_risk_map
+    render_risk_video, render_comparison_video, render_tail_risk_video, render_tail_risk_map, render_kg_video
 )
 
 print("=" * 60)
@@ -44,6 +45,10 @@ nlat, nlon = data['tas'].shape[1], data['tas'].shape[2]
 print(f"  Shape: {data['tas'].shape} — {T} years, {nlat}x{nlon} grid")
 print(f"  Years: {years[0]} to {years[-1]}")
 print(f"  Region: {region} | Coarsen: {coarsen}x | Intervention strength: {intervention_strength:g}x")
+
+# Precompute Köppen-Geiger codes for climate-relative stabilization
+print("  Precomputing Köppen-Geiger climate classification...")
+data['kg_codes'] = classify_grid(data['tas_monthly'], data['pr_monthly'])
 
 # 2. Compute tail risk (Gurjar & Camp 2026 + Hawkes process)
 print("\n[2/7] Computing tail-risk scores...")
@@ -109,7 +114,7 @@ with open('outputs/roi/roi_results.json', 'w') as f:
 print("\n[7/7] Rendering videos...")
 
 temporal_features_raw = build_temporal_features_raw(data)
-temporal_features = build_temporal_features(data, scaler=scaler)
+temporal_features, scaler = build_temporal_features(data)
 baseline_risk_series = []
 intervention_risk_series = {key: [] for key in INTERVENTIONS}
 
@@ -120,11 +125,12 @@ for t in range(T):
     feats = temporal_features[t]
     feats_raw = temporal_features_raw[t]
     temp_data = PyGData(
-        x=torch.tensor(feats, dtype=torch.float32),
+        x=torch.from_numpy(np.asarray(feats, dtype=np.float32)),
         edge_index=graph_data.edge_index,
         pos=graph_data.pos,
         num_nodes=graph_data.num_nodes,
     )
+
     b_risk = predict(model, temp_data)
     baseline_risk_series.append(b_risk.reshape(nlat, nlon))
 
@@ -133,7 +139,7 @@ for t in range(T):
             feats_raw, positions, interv, lons, scaler=scaler, strength=intervention_strength
         )
         mod_data = PyGData(
-            x=torch.tensor(mod_feats, dtype=torch.float32),
+            x=torch.from_numpy(np.asarray(mod_feats, dtype=np.float32)),
             edge_index=graph_data.edge_index,
             pos=graph_data.pos,
             num_nodes=graph_data.num_nodes,
@@ -164,6 +170,10 @@ with open("outputs/roi/risk_timeseries.json", "w") as f:
 print("  Computing per-timestep tail-risk flags...")
 _scores_series, flags_series, _regime_series = compute_tail_risk_series(data)
 
+# Köppen-Geiger climate classification series
+print("  Computing Köppen-Geiger climate classification series...")
+kg_series = classify_grid(data['tas_monthly'], data['pr_monthly'])
+
 # Render all videos (pass year_labels for correct annotation)
 year_labels = years
 
@@ -174,6 +184,10 @@ render_risk_video(baseline_risk_series, data['lats'], data['lons'],
 render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
                        'outputs/videos/tail_risk_escalation.mp4',
                        year_labels=year_labels)
+
+render_kg_video(kg_series, data['lats'], data['lons'],
+                'outputs/videos/climate_classification_shift.mp4',
+                year_labels=year_labels)
 
 print("  Generating Strategic Resilience Opportunity Map...")
 # Logic: Map the DELTA (Baseline - Intervention) to show where value is created

@@ -18,6 +18,7 @@ import os
 import glob
 import pickle
 import numpy as np
+from pathlib import Path
 
 
 # Default SE Asia coastal bounding box
@@ -56,27 +57,78 @@ def load_climate_data(
         return data
 
     # Try to find ISIMIP NetCDF files (tas required; pr optional)
-    tas_files = _find_isimip_files(raw_dir, var="tas")
-    pr_files = _find_isimip_files(raw_dir, var="pr")
-    if tas_files:
-        print(f"  Found {len(tas_files)} ISIMIP tas NetCDF files in {raw_dir}")
-        if pr_files:
-            print(f"  Found {len(pr_files)} ISIMIP pr NetCDF files in {raw_dir}")
-        return _load_from_netcdf(tas_files, pr_files, data_dir, region=region, coarsen=coarsen)
+    chosen_raw = None
+    tas_files, pr_files = [], []
+    for cand in _candidate_raw_dirs(raw_dir):
+        tas_files = _find_isimip_files(cand, var="tas")
+        if not tas_files:
+            continue
+        pr_files = _find_isimip_files(cand, var="pr")
+        chosen_raw = cand
+        break
 
-    # Also check parent directory (cluster layout: ../data/raw)
-    alt_raw = os.path.join(os.path.dirname(raw_dir), '..', 'data', 'raw')
-    tas_files = _find_isimip_files(alt_raw, var="tas")
-    pr_files = _find_isimip_files(alt_raw, var="pr")
-    if tas_files:
-        print(f"  Found {len(tas_files)} ISIMIP tas NetCDF files in {alt_raw}")
+    if chosen_raw is not None:
+        print(f"  Using raw_dir={chosen_raw}")
+        print(f"  Found {len(tas_files)} ISIMIP tas NetCDF files in {chosen_raw}")
         if pr_files:
-            print(f"  Found {len(pr_files)} ISIMIP pr NetCDF files in {alt_raw}")
-        return _load_from_netcdf(tas_files, pr_files, data_dir, region=region, coarsen=coarsen)
+            print(f"  Found {len(pr_files)} ISIMIP pr NetCDF files in {chosen_raw}")
+        return _load_from_netcdf(
+            tas_files,
+            pr_files,
+            data_dir,
+            region=region,
+            coarsen=coarsen,
+            out_pkl_path=pkl_path,
+        )
 
     # Fall back to synthetic
+    if region == "global":
+        raise FileNotFoundError(
+            "No ISIMIP NetCDFs found for region='global'.\n\n"
+            "Fix:\n"
+            "  - Ensure the NetCDF files exist on disk (tas/pr) and are reachable from this repo.\n"
+            "  - If your raw files live one directory above the repo (common on clusters), create a symlink:\n"
+            "      mkdir -p data && ln -s ../data/raw data/raw\n"
+            "  - Or set SENTREE_RAW_DIR=/absolute/path/to/data/raw\n"
+        )
     print("  WARNING: No ISIMIP data found. Generating synthetic data.")
-    return _generate_synthetic(data_dir)
+    data = _generate_synthetic(data_dir)
+    os.makedirs(data_dir, exist_ok=True)
+    with open(pkl_path, "wb") as f:
+        pickle.dump(data, f)
+    print(f"  Saved processed data to {pkl_path}")
+    return data
+
+
+def _candidate_raw_dirs(raw_dir: str) -> list[str]:
+    """Return a prioritized list of candidate raw directories."""
+    candidates: list[Path] = []
+
+    env_raw = os.environ.get("SENTREE_RAW_DIR")
+    if env_raw:
+        candidates.append(Path(env_raw))
+
+    candidates.append(Path(raw_dir))
+
+    # Repo-relative fallbacks (cluster setups often store raw data alongside the repo).
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates.append(repo_root / "data" / "raw")
+    candidates.append(repo_root.parent / "data" / "raw")
+
+    # CWD-relative fallbacks (for runs from scripts/ or other working dirs).
+    cwd = Path.cwd()
+    candidates.append(cwd / "data" / "raw")
+    candidates.append(cwd.parent / "data" / "raw")
+
+    out: list[str] = []
+    for p in candidates:
+        try:
+            s = str(p)
+        except Exception:
+            continue
+        if s not in out:
+            out.append(s)
+    return out
 
 
 def _find_isimip_files(raw_dir, *, var: str):
@@ -95,7 +147,15 @@ def _find_isimip_files(raw_dir, *, var: str):
     return sorted(set(files))
 
 
-def _load_from_netcdf(tas_files, pr_files, out_dir, *, region: str, coarsen: int):
+def _load_from_netcdf(
+    tas_files,
+    pr_files,
+    out_dir,
+    *,
+    region: str,
+    coarsen: int,
+    out_pkl_path: str,
+):
     """
     Load ISIMIP3b daily NetCDF files for tas (and optionally pr), concatenate,
     resample to annual means, and optionally subset/coarsen.
@@ -261,11 +321,9 @@ def _load_from_netcdf(tas_files, pr_files, out_dir, *, region: str, coarsen: int
     }
 
     os.makedirs(out_dir, exist_ok=True)
-    cache_name = f"climate_data_{region}_c{int(coarsen)}.pkl"
-    pkl_path = os.path.join(out_dir, cache_name)
-    with open(pkl_path, 'wb') as f:
+    with open(out_pkl_path, "wb") as f:
         pickle.dump(data, f)
-    print(f"  Saved processed data to {pkl_path}")
+    print(f"  Saved processed data to {out_pkl_path}")
 
     ds_tas.close()
     return data

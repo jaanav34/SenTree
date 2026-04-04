@@ -311,3 +311,68 @@ def render_tail_risk_map(value_grid, flags_grid, lats, lons, output_path,
     plt.close(fig)
     print(f"✅ Success: Resilience Opportunity Map saved to {output_path}")
     return output_path
+
+
+# Köppen-Geiger color mapping for visualization
+KG_COLORS = {
+    1: '#0000FF', 2: '#0077FF', 3: '#44AAFF', 4: '#77CCFF', # Group A: Tropical (Blue)
+    5: '#FF0000', 6: '#FF7777', 7: '#FFAA00', 8: '#FFCC00', # Group B: Dry (Red/Orange)
+    9: '#00FF00', 10: '#33FF33', 11: '#66FF66', 12: '#99FF99', 13: '#CCFFCC', 14: '#00AA00', # Group C: Temperate (Green)
+    15: '#AAFF00', 16: '#DDFF00', 17: '#FFFF00',
+    18: '#AA00FF', 19: '#CC00FF', 20: '#EE00FF', 21: '#FF00FF', # Group D: Continental (Purple/Magenta)
+    22: '#AA77FF', 23: '#CC99FF', 24: '#EECCFF', 25: '#FFCCFF',
+    26: '#7700AA', 27: '#9900CC', 28: '#CC00EE', 29: '#EE00FF',
+    30: '#AAAAAA', 31: '#DDDDDD', # Group E: Polar (Grey)
+    0: '#000000' # Unknown
+}
+
+def render_kg_video(kg_series, lats, lons, output_path, fps=4, year_labels=None):
+    """Render a time series of Köppen-Geiger classifications."""
+    from src.data.koppen_geiger import KG_LABELS
+    import matplotlib.colors as mcolors
+    from matplotlib.patches import Patch
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    extent = [lons[0], lons[-1], lats[0], lats[-1]]
+
+    # Create discrete colormap for only used values
+    unique_vals = sorted(np.unique(kg_series))
+    if 0 not in unique_vals: unique_vals = [0] + unique_vals
+    
+    colors = [KG_COLORS.get(v, '#FFFFFF') for v in unique_vals]
+    cmap = mcolors.ListedColormap(colors)
+    norm = mcolors.BoundaryNorm(np.arange(len(unique_vals) + 1) - 0.5, len(unique_vals))
+
+    # Create a mapping from KG value to 0..N-1 for imshow
+    val_to_idx = {v: i for i, v in enumerate(unique_vals)}
+    mapped_kg = np.vectorize(val_to_idx.get)(kg_series[0])
+
+    im = ax.imshow(mapped_kg, cmap=cmap, norm=norm, origin='lower',
+                   extent=extent, aspect='auto', interpolation='nearest')
+
+    ax.set_xlabel('Longitude (°E)')
+    ax.set_ylabel('Latitude (°N)')
+    
+    current_year = year_labels[0] if year_labels is not None else 2015
+    title_text = ax.set_title(f'Köppen-Geiger Climate Classification — Year {current_year}')
+
+    # Legend for present classes
+    legend_elements = [Patch(facecolor=KG_COLORS.get(v), label=f"{v}: {KG_LABELS.get(v, 'Unknown')}")
+                      for v in unique_vals if v != 0]
+    ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1), title="Climate Zones")
+
+    def update(frame):
+        mapped = np.vectorize(val_to_idx.get)(kg_series[frame])
+        im.set_data(mapped)
+        year = year_labels[frame] if year_labels is not None else 2015 + frame
+        title_text.set_text(f'Köppen-Geiger Climate Classification — Year {year}')
+        return [im, title_text]
+
+    ani = animation.FuncAnimation(fig, update, frames=len(kg_series),
+                                   interval=1000//fps, blit=False)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    _save_animation(ani, output_path, fps=fps, dpi=100)
+    plt.close(fig)
+    print(f"Saved Köppen-Geiger video: {output_path}")
+    return output_path

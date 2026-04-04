@@ -294,7 +294,8 @@ def kg_regime_loss(pred: torch.Tensor, kg_onehot: torch.Tensor,
 # ---------------------------------------------------------------------------
 
 def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
-              weight_decay=1e-4, schedule=True, kg_loss_weight=0.05):
+              weight_decay=1e-4, schedule=True, kg_loss_weight=0.05,
+              return_history: bool = False):
     """
     AdamW + cosine annealing + label smoothing + KG regime contrastive loss.
     """
@@ -310,12 +311,15 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
             optimizer, T_max=epochs, eta_min=lr * 0.01
         )
 
-    target = torch.tensor(target_scores, dtype=torch.float32, device=device)
+    target = torch.as_tensor(target_scores, dtype=torch.float32, device=device)
     target = (target - target.min()) / (target.max() - target.min() + 1e-8)
     target = target * 0.95 + 0.025
 
     loss_fn = nn.HuberLoss(delta=0.5)
     best_loss = float('inf')
+    loss_history = []
+    learning_rate_history = []
+    prediction_history = []
 
     model.train()
     for epoch in range(epochs):
@@ -335,17 +339,47 @@ def train_gnn(model, data, target_scores, epochs=50, lr=0.005,
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
+        current_lr = optimizer.param_groups[0]['lr']
         if scheduler:
             scheduler.step()
 
+        loss_history.append(loss.item())
+        learning_rate_history.append(current_lr)
+
+        if return_history:
+            model.eval()
+            with torch.no_grad():
+                prediction_history.append(
+                    model(data).detach().cpu().numpy().copy()
+                )
+            model.train()
+
         if (epoch + 1) % 10 == 0:
             print(f"  Epoch {epoch+1}/{epochs}, Loss: {loss.item():.6f}, "
-                  f"LR: {optimizer.param_groups[0]['lr']:.6f}")
+                  f"LR: {current_lr:.6f}")
 
         if loss.item() < best_loss - 1e-6:
             best_loss = loss.item()
 
-    return model
+    if not return_history:
+        return model
+
+    positions = getattr(data, "pos", None)
+    edge_index = getattr(data, "edge_index", None)
+
+    history = {
+        "positions": positions.detach().cpu().numpy().copy()
+        if positions is not None else np.empty((0, 2), dtype=np.float32),
+        "edge_index_sample": edge_index.detach().cpu().numpy().copy()
+        if edge_index is not None else np.empty((2, 0), dtype=np.int64),
+        "target": target.detach().cpu().numpy().copy(),
+        "predictions": np.stack(prediction_history).astype(np.float32, copy=False)
+        if prediction_history else np.empty((0, target.shape[0]), dtype=np.float32),
+        "loss": np.asarray(loss_history, dtype=np.float32),
+        "learning_rate": np.asarray(learning_rate_history, dtype=np.float32),
+    }
+
+    return model, history
 
 
 # ---------------------------------------------------------------------------

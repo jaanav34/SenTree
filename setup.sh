@@ -3,8 +3,22 @@ set -e
 
 echo "=== SenTree Setup ==="
 
+PYTHON="${PYTHON:-python}"
+PY_VER="$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+PY_MAJ="${PY_VER%.*}"
+PY_MIN="${PY_VER#*.}"
+if [ "$PY_MAJ" = "3" ] && [ "$PY_MIN" -ge 14 ]; then
+  if [ "${SENTREE_SKIP_PY_VERSION_CHECK:-}" = "1" ]; then
+    echo "WARNING: Skipping Python version check (Python $PY_VER)." 1>&2
+  else
+  echo "ERROR: Python $PY_VER is too new for reliable wheels (numpy/torch often missing)." 1>&2
+  echo "Install Python 3.12 or 3.13 and re-run, or set PYTHON=python3.12" 1>&2
+  exit 1
+  fi
+fi
+
 if [ ! -d ".venv" ]; then
-  python -m venv .venv
+  "$PYTHON" -m venv .venv
 fi
 
 VENV_PY=".venv/bin/python"

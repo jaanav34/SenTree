@@ -32,6 +32,8 @@ src/dashboard/     → Streamlit app (search bar → video + ROI + risk flags)
 ## Key Commands
 
 ```bash
+# Prereq: Python 3.12 or 3.13 recommended (3.14+ often lacks wheels for numpy/torch)
+
 # Setup (mandatory venv)
 ./setup.sh                       # macOS/Linux
 powershell -ExecutionPolicy Bypass -File .\\setup.ps1  # Windows

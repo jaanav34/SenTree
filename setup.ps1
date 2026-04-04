@@ -2,9 +2,28 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "=== SenTree Setup (Windows PowerShell) ==="
 
+function Invoke-Checked {
+  param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Args
+  )
+  & $Exe @Args
+  if ($LASTEXITCODE -ne 0) {
+    throw "Command failed ($LASTEXITCODE): $Exe $($Args -join ' ')"
+  }
+}
+
 function Resolve-Python {
   $py = Get-Command py -ErrorAction SilentlyContinue
-  if ($py) { return @("py", "-3") }
+  if ($py) {
+    foreach ($ver in @("3.12", "3.13", "3.11", "3.10", "3")) {
+      $flag = "-$ver"
+      & py $flag -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        return @("py", $flag)
+      }
+    }
+  }
 
   $python = Get-Command python -ErrorAction SilentlyContinue
   if ($python) { return @("python") }
@@ -13,10 +32,22 @@ function Resolve-Python {
 }
 
 $pythonCmd = Resolve-Python
+$pyExe = $pythonCmd[0]
+$pyArgs = @()
+if ($pythonCmd.Length -gt 1) { $pyArgs = @($pythonCmd[1]) }
+
+$versionStr = (& $pyExe @pyArgs -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+if ($versionStr -match '^(\d+)\.(\d+)$') {
+  $maj = [int]$Matches[1]
+  $min = [int]$Matches[2]
+  if (-not $env:SENTREE_SKIP_PY_VERSION_CHECK -and $maj -eq 3 -and $min -ge 14) {
+    throw "Python $versionStr is too new for reliable wheels (numpy/torch often missing). Install Python 3.12 or 3.13 and re-run setup."
+  }
+}
 
 if (-not (Test-Path ".venv")) {
   Write-Host "Creating virtual environment at .venv ..."
-  & $pythonCmd[0] @($pythonCmd[1..($pythonCmd.Length-1)]) -m venv .venv
+  Invoke-Checked $pyExe @pyArgs "-m" "venv" ".venv"
 }
 
 $venvPython = Join-Path ".venv" "Scripts\python.exe"
@@ -24,11 +55,41 @@ if (-not (Test-Path $venvPython)) {
   throw "Virtual environment Python not found at $venvPython"
 }
 
+function Ensure-VenvPip {
+  & $venvPython -m pip --version 2>$null
+  if ($LASTEXITCODE -eq 0) { return }
+
+  Write-Host "Bootstrapping pip inside .venv..."
+  New-Item -ItemType Directory -Force -Path ".tmp" | Out-Null
+
+  $oldTemp = $env:TEMP
+  $oldTmp = $env:TMP
+  $tmpDir = (Resolve-Path ".tmp").Path
+  $env:TEMP = $tmpDir
+  $env:TMP = $tmpDir
+
+  & $venvPython -m ensurepip --upgrade --default-pip 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "ensurepip failed; extracting bundled pip wheel as a fallback..."
+    Invoke-Checked $venvPython "-c" "import ensurepip, pathlib, zipfile, ensurepip._bundled; import os; site=r'$(Resolve-Path '.\\.venv\\Lib\\site-packages')'; p=next(pathlib.Path(ensurepip._bundled.__path__[0]).glob('pip-*.whl')); zipfile.ZipFile(p).extractall(site); print('pip extracted from', p)"
+  }
+
+  $env:TEMP = $oldTemp
+  $env:TMP = $oldTmp
+
+  & $venvPython -m pip --version 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    throw "pip could not be installed into .venv (even after fallback)."
+  }
+}
+
+Ensure-VenvPip
+
 Write-Host "Upgrading pip..."
-& $venvPython -m pip install --upgrade pip
+Invoke-Checked $venvPython "-m" "pip" "install" "--upgrade" "pip"
 
 Write-Host "Installing requirements.txt (venv-only)..."
-& $venvPython -m pip install --require-virtualenv -r requirements.txt
+Invoke-Checked $venvPython "-m" "pip" "install" "--require-virtualenv" "-r" "requirements.txt"
 
 # PyG CPU extras install (best-effort)
 Write-Host "Installing PyG CPU extras (best-effort)..."
@@ -49,4 +110,3 @@ Write-Host "  2. `$env:GOOGLE_API_KEY = 'your-key'"
 Write-Host "  3. .\.venv\Scripts\python.exe scripts\run_pipeline.py"
 Write-Host "  4. .\.venv\Scripts\python.exe scripts\index_videos.py"
 Write-Host "  5. .\.venv\Scripts\python.exe -m streamlit run src\dashboard\app.py"
-

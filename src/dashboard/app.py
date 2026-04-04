@@ -570,17 +570,20 @@ def _approx_cell_size_m(lats: np.ndarray, lons: np.ndarray) -> int:
     dlon = np.nanmedian(np.abs(np.diff(lons)))
     step_deg = float(np.nanmax([dlat, dlon]))
 
-    # deck.gl layers size cells in meters in WebMercator space. For global grids, the
-    # lon spacing (in meters) collapses near the poles by ~cos(latitude). If we use an
-    # equator-based meter size, high-latitude rows get binned/overlapped and look like
-    # "clustering bands" at ~±85°.
-    max_abs_lat = float(np.nanmax(np.abs(lats)))
-    cos_factor = float(np.cos(np.deg2rad(max_abs_lat)))
-    cos_factor = max(cos_factor, 1e-3)
+    # deck.gl layers size cells in meters in WebMercator space. Longitudinal spacing
+    # in meters collapses near the poles by ~cos(latitude). Using an equator-based
+    # meter size causes high-latitude rows to merge into bands; scaling by max-lat
+    # makes cells too tiny to see when zoomed out.
+    #
+    # Use a mid-latitude reference and clamp so global views remain visible.
+    abs_lats = np.abs(lats)
+    ref_lat = float(np.nanpercentile(abs_lats, 60))  # ~mid-high latitude
+    cos_factor = float(np.cos(np.deg2rad(ref_lat)))
+    cos_factor = float(np.clip(cos_factor, 0.25, 1.0))
 
-    # 1° latitude ~= 111 km (good enough for UI sizing); scale by polar cos-factor.
-    cell = int(round(111_000.0 * step_deg * cos_factor * 0.85))
-    return int(np.clip(cell, 5_000, 350_000))
+    # 1° latitude ~= 111 km (good enough for UI sizing)
+    cell = int(round(111_000.0 * step_deg * cos_factor))
+    return int(np.clip(cell, 20_000, 350_000))
 
 
 @st.cache_data
@@ -1131,7 +1134,8 @@ if opportunity is not None:
             )
 
         # Optional downsample for performance if needed.
-        max_points = 6000
+        # 16k points (global coarsen=4) is fine; only downsample when extremely large.
+        max_points = 50_000
         if len(df_pts) > max_points:
             df_pts = df_pts.sample(max_points, random_state=0)
 

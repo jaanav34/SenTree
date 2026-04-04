@@ -110,7 +110,7 @@ with open('outputs/roi/roi_results.json', 'w') as f:
 print("\n[7/7] Rendering videos...")
 
 temporal_features_raw = build_temporal_features_raw(data)
-temporal_features = build_temporal_features(data, scaler=scaler)
+temporal_features, scaler = build_temporal_features(data)
 baseline_risk_series = []
 intervention_risk_series = {key: [] for key in INTERVENTIONS}
 
@@ -121,18 +121,19 @@ for t in range(T):
     feats = temporal_features[t]
     feats_raw = temporal_features_raw[t]
     temp_data = PyGData(
-        x=torch.tensor(feats, dtype=torch.float32),
+        x=torch.from_numpy(np.asarray(feats, dtype=np.float32)),
         edge_index=graph_data.edge_index,
         pos=graph_data.pos,
         num_nodes=graph_data.num_nodes,
     )
+
     b_risk = predict(model, temp_data)
     baseline_risk_series.append(b_risk.reshape(nlat, nlon))
 
     for key, interv in INTERVENTIONS.items():
         mod_feats = apply_intervention(feats_raw, positions, interv, lons, scaler=scaler)
         mod_data = PyGData(
-            x=torch.tensor(mod_feats, dtype=torch.float32),
+            x=torch.from_numpy(np.asarray(mod_feats, dtype=np.float32)),
             edge_index=graph_data.edge_index,
             pos=graph_data.pos,
             num_nodes=graph_data.num_nodes,

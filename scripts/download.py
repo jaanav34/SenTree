@@ -1,8 +1,12 @@
 import os
 import urllib.request
+from pathlib import Path
 
-raw_dir = '../data/raw'
-os.makedirs(raw_dir, exist_ok=True)
+# Always download into the repo's `data/raw` directory, regardless of CWD.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+raw_dir = REPO_ROOT / "data" / "raw"
+raw_dir.mkdir(parents=True, exist_ok=True)
+print(f"Downloading into: {raw_dir}")
 
 # The base URL for the ISIMIP3b atmospheric forcings
 base_url = "https://files.isimip.org/ISIMIP3b/InputData/climate/atmosphere/bias-adjusted/global/daily/ssp370/GFDL-ESM4/"
@@ -21,18 +25,18 @@ files = [
 
 print("Starting ISIMIP Data Fetch...")
 for filename in files:
-    file_path = os.path.join(raw_dir, filename)
+    file_path = raw_dir / filename
     url = base_url + filename
     
-    if not os.path.exists(file_path):
+    if not file_path.exists():
         print(f"Downloading: {filename}...")
         try:
-            urllib.request.urlretrieve(url, file_path)
-            print(f"✅ Finished: {filename}")
+            urllib.request.urlretrieve(url, str(file_path))
+            print(f"Finished: {filename}")
         except Exception as e:
-            print(f"❌ Failed to download {filename}: {e}")
+            print(f"Failed to download {filename}: {e}")
     else:
-        print(f"⏭️ Skipped (already exists): {filename}")
+        print(f"Skipped (already exists): {filename}")
         
 print("All files acquired!")
 

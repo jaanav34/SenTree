@@ -1,85 +1,235 @@
-"""Load ISIMIP NetCDF data or fall back to synthetic."""
+"""
+Load ISIMIP3b NetCDF data or fall back to synthetic.
+
+Handles the real ISIMIP3b dataset structure:
+  - Variable: tas (Near-Surface Air Temperature, units: Kelvin)
+  - Dims: (time, lat, lon) — DAILY data
+  - Resolution: 0.5° globally (360 lat x 720 lon)
+  - Lat: 89.75 to -89.75 (DESCENDING)
+  - Lon: -179.75 to 179.75
+  - Files split by decade: *_2015_2020.nc, *_2021_2030.nc, ...
+
+We resample daily -> annual mean, subset to SE Asia, convert K -> °C.
+"""
 import os
+import glob
 import pickle
 import numpy as np
 
 
+# SE Asia coastal bounding box
+LAT_MIN, LAT_MAX = -10.0, 25.0
+LON_MIN, LON_MAX = 90.0, 130.0
+
+
 def load_climate_data(data_dir='data/processed', raw_dir='data/raw'):
-    """Load processed climate data. Generate synthetic if not available."""
+    """Load processed climate data. Try real ISIMIP, fall back to synthetic."""
     pkl_path = os.path.join(data_dir, 'climate_data.pkl')
 
     if os.path.exists(pkl_path):
         with open(pkl_path, 'rb') as f:
-            return pickle.load(f)
+            data = pickle.load(f)
+        print(f"  Loaded cached data from {pkl_path}")
+        return data
 
-    # Try NetCDF
-    tas_path = os.path.join(raw_dir, 'tas_ssp370.nc')
-    if os.path.exists(tas_path):
-        return _load_from_netcdf(raw_dir, data_dir)
+    # Try to find ISIMIP NetCDF files
+    nc_files = _find_isimip_files(raw_dir)
+    if nc_files:
+        print(f"  Found {len(nc_files)} ISIMIP NetCDF files in {raw_dir}")
+        return _load_from_netcdf(nc_files, data_dir)
+
+    # Also check parent directory (cluster layout: ../data/raw)
+    alt_raw = os.path.join(os.path.dirname(raw_dir), '..', 'data', 'raw')
+    nc_files = _find_isimip_files(alt_raw)
+    if nc_files:
+        print(f"  Found {len(nc_files)} ISIMIP NetCDF files in {alt_raw}")
+        return _load_from_netcdf(nc_files, data_dir)
 
     # Fall back to synthetic
-    print("WARNING: No ISIMIP data found. Generating synthetic data.")
+    print("  WARNING: No ISIMIP data found. Generating synthetic data.")
     return _generate_synthetic(data_dir)
 
 
-def _load_from_netcdf(raw_dir, out_dir):
+def _find_isimip_files(raw_dir):
+    """Find all ISIMIP tas NetCDF files in a directory."""
+    if not os.path.isdir(raw_dir):
+        return []
+    patterns = [
+        os.path.join(raw_dir, '*ssp370_tas_global_daily_*.nc'),
+        os.path.join(raw_dir, '*ssp370_tas_*.nc'),
+    ]
+    files = []
+    for pat in patterns:
+        files.extend(glob.glob(pat))
+    return sorted(set(files))
+
+
+def _load_from_netcdf(nc_files, out_dir):
+    """
+    Load multiple ISIMIP3b daily NetCDF files, concatenate, resample to
+    annual means, subset to SE Asia, convert K -> °C.
+    """
     import xarray as xr
 
-    lat_range = slice(-10, 25)
-    lon_range = slice(90, 130)
+    print(f"  Opening {len(nc_files)} files...")
+    for f in nc_files:
+        print(f"    {os.path.basename(f)}")
 
-    tas = xr.open_dataset(f'{raw_dir}/tas_ssp370.nc')['tas']
-    tas = tas.sel(lat=lat_range, lon=lon_range).resample(time='1YE').mean()
+    # Open all files as a single dataset (auto-concatenates along time)
+    ds = xr.open_mfdataset(nc_files, combine='by_coords', chunks={'time': 365})
 
-    pr = xr.open_dataset(f'{raw_dir}/pr_ssp370.nc')['pr']
-    pr = pr.sel(lat=lat_range, lon=lon_range).resample(time='1YE').mean()
+    # The variable is 'tas' (Near-Surface Air Temperature in Kelvin)
+    tas_raw = ds['tas']
+    print(f"  Raw shape: {dict(tas_raw.sizes)}")
+    print(f"  Time range: {str(tas_raw.time.values[0])[:10]} to {str(tas_raw.time.values[-1])[:10]}")
+
+    # Subset to SE Asia
+    # ISIMIP lat is DESCENDING (89.75, 89.25, ..., -89.75), so we need
+    # to handle the slice direction correctly
+    lat_vals = tas_raw.lat.values
+    if lat_vals[0] > lat_vals[-1]:
+        # Descending lat: slice(max, min)
+        tas_subset = tas_raw.sel(
+            lat=slice(LAT_MAX, LAT_MIN),
+            lon=slice(LON_MIN, LON_MAX),
+        )
+    else:
+        tas_subset = tas_raw.sel(
+            lat=slice(LAT_MIN, LAT_MAX),
+            lon=slice(LON_MIN, LON_MAX),
+        )
+
+    print(f"  SE Asia subset: {dict(tas_subset.sizes)}")
+
+    # Resample daily -> annual mean
+    print("  Resampling daily -> annual mean...")
+    tas_annual = tas_subset.resample(time='1YE').mean()
+
+    # Load into memory and convert K -> °C
+    print("  Loading into memory & converting K -> °C...")
+    tas_values = tas_annual.values - 273.15  # K -> °C
+
+    # Get coordinates
+    lats = tas_annual.lat.values.astype(np.float64)
+    lons = tas_annual.lon.values.astype(np.float64)
+
+    # Ensure lat is ascending (for consistent plotting with origin='lower')
+    if lats[0] > lats[-1]:
+        lats = lats[::-1]
+        tas_values = tas_values[:, ::-1, :]
+
+    # Extract years from the time coordinate
+    years = np.array([int(str(t)[:4]) for t in tas_annual.time.values])
+
+    print(f"  Annual data: {tas_values.shape} — {len(years)} years")
+    print(f"  Years: {years[0]} to {years[-1]}")
+    print(f"  Lats: {lats[0]:.2f} to {lats[-1]:.2f} ({len(lats)} points)")
+    print(f"  Lons: {lons[0]:.2f} to {lons[-1]:.2f} ({len(lons)} points)")
+    print(f"  Temp range: {tas_values.min():.1f} to {tas_values.max():.1f} °C")
+
+    nlat, nlon = len(lats), len(lons)
+
+    # We don't have pr (precipitation) in the downloaded files — synthesize it
+    # based on temperature with realistic climate relationships
+    print("  Generating synthetic precipitation (pr not in downloaded files)...")
+    pr = _synthesize_precipitation(tas_values, lats, lons, years)
+
+    # GDP and population (gridded proxies for SE Asia)
+    gdp, pop, soil_moisture, coastal_factor = _generate_socioeconomic(lats, lons)
 
     data = {
-        'tas': tas.values,
-        'pr': pr.values,
-        'lats': tas.lat.values,
-        'lons': tas.lon.values,
-        'years': np.array([t.year for t in tas.time.values]),
-        'gdp': np.random.uniform(5000, 40000, (len(tas.lat), len(tas.lon))),
-        'pop': np.random.uniform(50, 5000, (len(tas.lat), len(tas.lon))),
+        'tas': tas_values.astype(np.float32),
+        'pr': pr.astype(np.float32),
+        'gdp': gdp.astype(np.float32),
+        'pop': pop.astype(np.float32),
+        'soil_moisture': soil_moisture.astype(np.float32),
+        'coastal_factor': coastal_factor.astype(np.float32),
+        'lats': lats,
+        'lons': lons,
+        'years': years,
     }
 
     os.makedirs(out_dir, exist_ok=True)
-    with open(f'{out_dir}/climate_data.pkl', 'wb') as f:
+    pkl_path = os.path.join(out_dir, 'climate_data.pkl')
+    with open(pkl_path, 'wb') as f:
         pickle.dump(data, f)
+    print(f"  Saved processed data to {pkl_path}")
+
+    ds.close()
     return data
+
+
+def _synthesize_precipitation(tas, lats, lons, years):
+    """
+    Generate realistic precipitation from temperature using
+    Clausius-Clapeyron scaling and SE Asian monsoon patterns.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    np.random.seed(42)
+    T, nlat, nlon = tas.shape
+
+    lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
+
+    # Base precipitation: higher in tropics and near coast
+    coastal_distance = (lon_grid.max() - lon_grid) / (lon_grid.max() - lon_grid.min())
+    coastal_factor = np.exp(-3 * coastal_distance)
+    pr_base = 6.0 + 3.0 * coastal_factor + 1.5 * np.cos(np.radians(lat_grid) * 2)
+
+    pr = np.zeros_like(tas)
+    for t in range(T):
+        # Clausius-Clapeyron: +7% per K above baseline
+        temp_anomaly = tas[t] - tas[0]
+        cc_scaling = 1.0 + 0.07 * np.clip(temp_anomaly, 0, 10)
+        var_scale = 1.0 + 0.02 * t
+
+        pr[t] = pr_base * cc_scaling + np.random.normal(0, 1.2 * var_scale, (nlat, nlon))
+        corr_rain = gaussian_filter(np.random.normal(0, 1.0, (nlat, nlon)), sigma=3)
+        pr[t] += corr_rain
+        pr[t] = np.clip(pr[t], 0.01, 30)
+
+    return pr
+
+
+def _generate_socioeconomic(lats, lons):
+    """Generate GDP, population, soil moisture, and coastal factor grids."""
+    from scipy.ndimage import gaussian_filter
+
+    np.random.seed(123)
+    nlat, nlon = len(lats), len(lons)
+    lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
+
+    # Coastal factor
+    coastal_distance = (lon_grid.max() - lon_grid) / (lon_grid.max() - lon_grid.min())
+    coastal_factor = np.exp(-3 * coastal_distance)
+
+    # GDP
+    gdp_base = np.random.uniform(3000, 15000, (nlat, nlon))
+    cities = [
+        (13.7, 100.5, 45000), (-6.2, 106.8, 35000), (14.6, 121.0, 28000),
+        (10.8, 106.7, 30000), (1.3, 103.8, 60000), (3.1, 101.7, 40000),
+        (7.0, 125.0, 20000), (-8.0, 112.0, 22000),
+    ]
+    for clat, clon, cgdp in cities:
+        dist = np.sqrt((lat_grid - clat)**2 + (lon_grid - clon)**2)
+        gdp_base += cgdp * np.exp(-dist**2 / 8)
+    gdp = np.clip(gdp_base * (1 + 0.8 * coastal_factor), 1000, 80000)
+
+    # Population
+    pop_base = np.random.uniform(20, 500, (nlat, nlon))
+    for clat, clon, cgdp in cities:
+        dist = np.sqrt((lat_grid - clat)**2 + (lon_grid - clon)**2)
+        pop_base += (cgdp / 10) * np.exp(-dist**2 / 5)
+    pop = np.clip(pop_base * (1 + 1.5 * coastal_factor), 5, 15000)
+
+    # Soil moisture
+    soil = np.clip(0.3 + 0.15 * coastal_factor + np.random.uniform(-0.05, 0.05, (nlat, nlon)), 0.05, 0.95)
+
+    return gdp, pop, soil, coastal_factor
 
 
 def _generate_synthetic(out_dir):
-    np.random.seed(42)
-    lats = np.arange(-10, 26, 2)
-    lons = np.arange(90, 132, 2)
-    years = np.arange(2015, 2051)
-    ny, nlat, nlon = len(years), len(lats), len(lons)
-
-    temp_trend = np.linspace(0, 2.5, ny)
-    tas = np.zeros((ny, nlat, nlon))
-    pr = np.zeros((ny, nlat, nlon))
-
-    for t in range(ny):
-        tas[t] = 28.0 + temp_trend[t] + np.random.normal(0, 0.5, (nlat, nlon))
-        tas[t, :, -5:] += 0.3  # coastal warming
-        vol_scale = 1.0 + 0.02 * t
-        pr[t] = 5.5 + np.random.normal(0, 1.5 * vol_scale, (nlat, nlon))
-        pr[t] = np.clip(pr[t], 0.1, 20)
-
-    gdp = np.random.uniform(5000, 40000, (nlat, nlon))
-    gdp[:, -5:] *= 1.5
-    pop = np.random.uniform(50, 5000, (nlat, nlon))
-    pop[:, -5:] *= 2
-
-    data = {
-        'tas': tas, 'pr': pr, 'gdp': gdp, 'pop': pop,
-        'lats': lats, 'lons': lons, 'years': years,
-    }
-
-    os.makedirs(out_dir, exist_ok=True)
-    with open(f'{out_dir}/climate_data.pkl', 'wb') as f:
-        pickle.dump(data, f)
-    print(f"Synthetic data: {ny} years, {nlat*nlon} nodes")
-    return data
+    """Generate synthetic data matching real ISIMIP structure. 2015-2100."""
+    # Import the standalone generator
+    from data.generate_synthetic import generate_synthetic_data
+    return generate_synthetic_data(out_dir)

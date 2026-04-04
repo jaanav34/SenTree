@@ -28,7 +28,7 @@ with st.sidebar:
     intervention = st.selectbox('Intervention', ['Coastal Mangrove Restoration', 'Regenerative Agriculture', 'Both'])
     st.divider()
     st.markdown('**Region:** SE Asia Coastal')
-    st.markdown('**Time:** 2015-2050')
+    st.markdown('**Time:** 2015-2100')
 
 # --- Search ---
 col1, col2 = st.columns([3, 1])

@@ -35,8 +35,11 @@ print("=" * 60)
 # 1. Load data
 print("\n[1/7] Loading climate data...")
 data = load_climate_data()
-print(f"  Shape: {data['tas'].shape} — {len(data['years'])} years, "
-      f"{data['tas'].shape[1]}x{data['tas'].shape[2]} grid")
+years = data['years']
+T = len(years)
+nlat, nlon = data['tas'].shape[1], data['tas'].shape[2]
+print(f"  Shape: {data['tas'].shape} — {T} years, {nlat}x{nlon} grid")
+print(f"  Years: {years[0]} to {years[-1]}")
 
 # 2. Compute tail risk (Gurjar & Camp 2026 + Hawkes process)
 print("\n[2/7] Computing tail-risk scores...")
@@ -100,8 +103,6 @@ with open('outputs/roi/roi_results.json', 'w') as f:
 
 # 7. Render videos
 print("\n[7/7] Rendering videos...")
-nlat, nlon = data['tas'].shape[1], data['tas'].shape[2]
-T = data['tas'].shape[0]
 
 temporal_features_raw = build_temporal_features_raw(data)
 temporal_features = build_temporal_features(data, scaler=scaler)
@@ -142,8 +143,10 @@ def _series_stats(series_2d):
         "max": [float(x.max()) for x in series_2d],
     }
 
-years = [int(y) for y in range(2015, 2015 + T)]
-risk_timeseries = {"years": years, "baseline": _series_stats(baseline_risk_series)}
+risk_timeseries = {
+    "years": [int(y) for y in years],
+    "baseline": _series_stats(baseline_risk_series),
+}
 for key in INTERVENTIONS:
     risk_timeseries[key] = _series_stats(intervention_risk_series[key])
 
@@ -155,12 +158,16 @@ with open("outputs/roi/risk_timeseries.json", "w") as f:
 print("  Computing per-timestep tail-risk flags...")
 _scores_series, flags_series, _regime_series = compute_tail_risk_series(data)
 
-# Render all videos
+# Render all videos (pass year_labels for correct annotation)
+year_labels = years
+
 render_risk_video(baseline_risk_series, data['lats'], data['lons'],
-                  'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk')
+                  'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk',
+                  year_labels=year_labels)
 
 render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
-                       'outputs/videos/tail_risk_escalation.mp4')
+                       'outputs/videos/tail_risk_escalation.mp4',
+                       year_labels=year_labels)
 
 print("  Generating Strategic Resilience Opportunity Map...")
 # Logic: Map the DELTA (Baseline - Intervention) to show where value is created
@@ -173,9 +180,9 @@ for key in sim_results:
     total_reduction_map += reduction
 
 render_tail_risk_map(
-    total_reduction_map, 
-    flags_series[-1], 
-    data['lats'], 
+    total_reduction_map,
+    flags_series[-1],
+    data['lats'],
     data['lons'],
     'outputs/tail_risk_map.png',
     title='Strategic Resilience Opportunity & ROI Target Map',
@@ -185,9 +192,9 @@ render_tail_risk_map(
 # PRINT COORDINATES TO CLI FOR IMMEDIATE ACTION
 flagged_lats = data['lats'].repeat(nlon)[flags_series[-1].flatten()]
 flagged_lons = np.tile(data['lons'], nlat)[flags_series[-1].flatten()]
-print(f"\n🚀 HIGH-ROI TARGET LOCATIONS (Top 5 Priority Nodes):")
+print(f"\n  HIGH-ROI TARGET LOCATIONS (Top 5 Priority Nodes):")
 for i in range(min(5, len(flagged_lats))):
-    print(f"  - Coordinate: {flagged_lons[i]:.2f}E, {flagged_lats[i]:.2f}N")
+    print(f"    - Coordinate: {flagged_lons[i]:.2f}E, {flagged_lats[i]:.2f}N")
 
 for key in INTERVENTIONS:
     name = INTERVENTIONS[key]['name']
@@ -195,7 +202,8 @@ for key in INTERVENTIONS:
         baseline_risk_series, intervention_risk_series[key],
         data['lats'], data['lons'],
         f'outputs/videos/comparison_{key}.mp4',
-        intervention_name=name
+        intervention_name=name,
+        year_labels=year_labels,
     )
 
 print("\n" + "=" * 60)

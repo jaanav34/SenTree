@@ -46,8 +46,10 @@ def _save_animation(ani, output_path: str, *, fps: int, dpi: int = 100) -> None:
     raise ValueError(f"Unsupported video extension: {ext} (expected .mp4 or .gif)")
 
 
-def _risk_stats_series(risk_series):
-    years = np.arange(2015, 2015 + len(risk_series))
+def _risk_stats_series(risk_series, years=None):
+    if years is None:
+        years = np.arange(2015, 2015 + len(risk_series))
+    years = np.asarray(years)[:len(risk_series)]
     means = np.array([r.mean() for r in risk_series], dtype=np.float32)
     p95 = np.array([np.percentile(r, 95) for r in risk_series], dtype=np.float32)
     mx = np.array([r.max() for r in risk_series], dtype=np.float32)
@@ -55,7 +57,7 @@ def _risk_stats_series(risk_series):
 
 
 def render_risk_video(risk_series, lats, lons, output_path, title='Risk Heatmap',
-                      fps=4, scale_factor=8, cmap='YlOrRd'):
+                      fps=4, scale_factor=8, cmap='YlOrRd', year_labels=None):
     """Render a time series of risk grids as an MP4 video."""
     fig = plt.figure(figsize=(14, 8))
     gs = fig.add_gridspec(1, 2, width_ratios=[2.2, 1.0])
@@ -71,9 +73,10 @@ def render_risk_video(risk_series, lats, lons, output_path, title='Risk Heatmap'
     ax.set_xlabel('Longitude')
     ax.set_ylabel('Latitude')
     plt.colorbar(im, ax=ax, label='Risk Score')
-    title_text = ax.set_title(f'{title} — Year 2015')
+    _yl = year_labels if year_labels is not None else np.arange(2015, 2015 + len(risk_series))
+    title_text = ax.set_title(f'{title} — Year {_yl[0]}')
 
-    years, means, p95, mx = _risk_stats_series(risk_series)
+    years, means, p95, mx = _risk_stats_series(risk_series, years=year_labels)
     ax_ts.set_title("Risk Summary")
     ax_ts.set_xlabel("Year")
     ax_ts.set_ylabel("Risk")
@@ -89,7 +92,7 @@ def render_risk_video(risk_series, lats, lons, output_path, title='Risk Heatmap'
     def update(frame):
         hires = downscale_grid(risk_series[frame], scale_factor=scale_factor)
         im.set_data(hires)
-        title_text.set_text(f'{title} — Year {2015 + frame}')
+        title_text.set_text(f'{title} — Year {_yl[frame]}')
 
         x = years[: frame + 1]
         line_mean.set_data(x, means[: frame + 1])
@@ -111,7 +114,7 @@ def render_risk_video(risk_series, lats, lons, output_path, title='Risk Heatmap'
 
 def render_comparison_video(baseline_series, intervention_series, lats, lons,
                             output_path, intervention_name='Intervention',
-                            fps=4, scale_factor=8):
+                            fps=4, scale_factor=8, year_labels=None):
     """Side-by-side comparison: baseline vs intervention."""
     fig = plt.figure(figsize=(20, 8))
     gs = fig.add_gridspec(1, 3, width_ratios=[1.2, 1.2, 1.0])
@@ -139,10 +142,11 @@ def render_comparison_video(baseline_series, intervention_series, lats, lons,
     plt.colorbar(im1, ax=ax1, label='Risk')
     plt.colorbar(im2, ax=ax2, label='Risk')
 
-    year_text = fig.suptitle('Year 2015', fontsize=14, fontweight='bold')
+    _yl = year_labels if year_labels is not None else np.arange(2015, 2015 + len(baseline_series))
+    year_text = fig.suptitle(f'Year {_yl[0]}', fontsize=14, fontweight='bold')
 
-    years, b_mean, b_p95, _b_max = _risk_stats_series(baseline_series)
-    _years2, i_mean, i_p95, _i_max = _risk_stats_series(intervention_series)
+    years, b_mean, b_p95, _b_max = _risk_stats_series(baseline_series, years=year_labels)
+    _years2, i_mean, i_p95, _i_max = _risk_stats_series(intervention_series, years=year_labels)
 
     ax_ts.set_title("Quantitative Comparison")
     ax_ts.set_xlabel("Year")
@@ -165,7 +169,7 @@ def render_comparison_video(baseline_series, intervention_series, lats, lons,
     def update(frame):
         im1.set_data(downscale_grid(baseline_series[frame], scale_factor=scale_factor))
         im2.set_data(downscale_grid(intervention_series[frame], scale_factor=scale_factor))
-        year_text.set_text(f'Year {2015 + frame}')
+        year_text.set_text(f'Year {_yl[frame]}')
 
         x = years[: frame + 1]
         line_b.set_data(x, b_mean[: frame + 1])
@@ -185,7 +189,7 @@ def render_comparison_video(baseline_series, intervention_series, lats, lons,
 
 
 def render_tail_risk_video(risk_series, flags_series, lats, lons, output_path,
-                           fps=4, scale_factor=8):
+                           fps=4, scale_factor=8, year_labels=None):
     """Risk heatmap with tail-risk nodes highlighted."""
     fig = plt.figure(figsize=(14, 8))
     gs = fig.add_gridspec(1, 2, width_ratios=[2.2, 1.0])
@@ -210,9 +214,10 @@ def render_tail_risk_video(risk_series, flags_series, lats, lons, output_path,
 
     ax.legend(loc='upper left')
     plt.colorbar(im, ax=ax, label='Risk Score')
-    title_text = ax.set_title('Tail-Risk Escalation — Year 2015')
+    _yl = year_labels if year_labels is not None else np.arange(2015, 2015 + len(risk_series))
+    title_text = ax.set_title(f'Tail-Risk Escalation — Year {_yl[0]}')
 
-    years, means, p95, mx = _risk_stats_series(risk_series)
+    years, means, p95, mx = _risk_stats_series(risk_series, years=year_labels)
     flagged_counts = np.array([int(f.sum()) for f in flags_series], dtype=np.int32)
 
     ax_ts.set_title("Tail-Risk Summary")
@@ -242,7 +247,7 @@ def render_tail_risk_video(risk_series, flags_series, lats, lons, output_path,
         flagged = flags_series[frame].flatten()
         offsets = np.column_stack([lon_flat[flagged], lat_flat[flagged]])
         scatter.set_offsets(offsets if len(offsets) > 0 else np.empty((0, 2)))
-        title_text.set_text(f'Tail-Risk Escalation — Year {2015 + frame}')
+        title_text.set_text(f'Tail-Risk Escalation — Year {_yl[frame]}')
 
         x = years[: frame + 1]
         line_p95.set_data(x, p95[: frame + 1])

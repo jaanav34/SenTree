@@ -220,7 +220,10 @@ st.markdown(
         background: linear-gradient(180deg, rgba(255, 250, 241, 0.96), rgba(236, 245, 239, 0.93));
         border: 1px solid rgba(23, 52, 47, 0.10);
         box-shadow: 0 12px 32px rgba(23, 52, 47, 0.08);
-        min-height: 118px;
+        height: 142px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
     }
 
     .sentree-kpi-label {
@@ -243,6 +246,12 @@ st.markdown(
         margin-top: 0.42rem;
         color: var(--sentree-ink-soft);
         font-size: 0.92rem;
+        line-height: 1.2;
+        min-height: 2.2em;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
 
     h1, h2, h3 {
@@ -545,10 +554,10 @@ capital_allocation_m = int(st.session_state.get("capital_allocation_m", 50))
 
 # Top-level section icons + labels
 _NAV_SECTIONS = {
-    "Overview":       "🌏",
-    "Recommendation": "💡",
-    "Evidence":       "🔬",
-    "Model":          "🧠",
+    "Overview": "Overview",
+    "Recommendation": "Recommendation",
+    "Evidence": "Evidence",
+    "Model": "Model",
 }
 
 # Sub-pages per section (used to populate sidebar radio)
@@ -576,7 +585,7 @@ with st.sidebar:
     active_section = st.radio(
         "Section",
         list(_NAV_SECTIONS.keys()),
-        format_func=lambda s: f"{_NAV_SECTIONS[s]}  {s}",
+        format_func=lambda s: _NAV_SECTIONS[s],
         key="sentree_nav_section",
         label_visibility="collapsed",
     )

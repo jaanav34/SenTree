@@ -148,7 +148,7 @@ print("\n[5/7] Running simulations...")
 lons = data['lons']
 with _timed(timings, "5) run_all_simulations"):
     baseline_risk, sim_results = run_all_simulations(
-        model, graph_data, features_raw, positions, INTERVENTIONS, lons, scaler=scaler
+        model, graph_data, features_raw, positions, INTERVENTIONS, lons, scaler=scaler, strength=intervention_strength
     )
 
 # 6. Compute ROI (with Ito 2020 ensemble uncertainty)
@@ -164,6 +164,8 @@ with _timed(timings, "6) compute_roi (all interventions)"):
         roi_results[key] = {
             'name': result['name'],
             **roi,
+            'eligible_nodes': result['eligible_nodes'],
+            'eligible_share': result['eligible_share'],
             'tail_risk_nodes_neutralized': int((
                 (result['baseline_risk'] > np.percentile(result['baseline_risk'], 95)) &
                 (result['intervention_risk'] <= np.percentile(result['baseline_risk'], 95))
@@ -173,6 +175,7 @@ with _timed(timings, "6) compute_roi (all interventions)"):
         print(f"    ROI = {roi['roi']:.2f}x (range: {roi['roi_lower']:.2f} - {roi['roi_upper']:.2f})")
         print(f"    Loss avoided: ${roi['total_loss_avoided']:,.0f}")
         print(f"    Risk reduction: {roi['mean_risk_reduction']:.4f} (mean), {roi['max_risk_reduction']:.4f} (max)")
+        print(f"    Eligible footprint: {result['eligible_nodes']} nodes ({result['eligible_share']:.1%})")
         print(f"    Uncertainty: U_precip={roi['u_precip']:.3f}, U_model={roi['u_model']:.3f}, U_scenario={roi['u_scenario']:.3f}")
         print(f"    FRA (Ito 2020): {roi['fra']:.3f}")
 

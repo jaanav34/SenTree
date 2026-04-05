@@ -1000,6 +1000,26 @@ section_header(
     "Inspect the mathematical assumptions behind tail-risk escalation, ROI estimation, and the graph model itself.",
 )
 
+with st.expander("Investor-friendly glossary", expanded=True):
+    st.markdown(
+        """
+**What the GNN is simulating**
+The model predicts how climate stress at one location ripples to nearby locations. Each grid cell is a node, and edges connect nearby nodes. It learns a risk score for each node based on climate signals plus economic exposure.
+
+**Resilience ROI**
+A benefit-per-dollar score. It is the total avoided loss from an intervention divided by the cost of that intervention. Higher is better.
+
+**Loss (economic impact proxy)**
+Loss is modeled as climate risk multiplied by exposure. Exposure is a blend of GDP and population at that location. It answers: if this node fails, how costly is it?
+
+**Epochs**
+Each epoch is one training pass through the data. Early epochs are rough; later epochs show a more stable risk surface. The dashboard lets you scrub through this learning process.
+
+**How to use these for investing**
+Look for high Resilience ROI, large loss avoided, and interventions that neutralize many tail-risk nodes. That combination implies the biggest risk reduction per dollar.
+        """
+    )
+
 math_tab, playground_tab = st.tabs(['📐 Mathematical Foundations', '🎮 Interactive Playground'])
 
 with math_tab:

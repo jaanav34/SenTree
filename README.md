@@ -1,289 +1,207 @@
 # SenTree
 
-SenTree is a climate-risk simulation and search platform built around a graph neural network pipeline. It ingests ISIMIP-style climate data, identifies tail-risk escalation zones, classifies Koppen-Geiger climate types, simulates adaptation interventions, renders MP4 heatmaps, computes resilience ROI, and exposes the results in a Streamlit dashboard with optional semantic video search.
+SenTree is a climate adaptation intelligence platform for investor-style decision making.  
+It combines:
+- Graph neural network (GNN) climate risk propagation
+- Tail-risk escalation detection
+- Koppen-Geiger climate suitability filtering
+- Intervention simulation and resilience ROI
+- Native semantic search over simulation videos (Gemini Embedding 2, no RAG text middle layer)
 
-The current project is scoped around a Southeast Asia coastal region and was structured as a hackathon prototype for climate adaptation intelligence.
+The current build is optimized for a hackathon demo: clear decisions, explainable math, and fast visual evidence.
 
-## What It Does
+## Product Goal
 
-- Loads processed climate data from `data/processed/climate_data.pkl`, real ISIMIP NetCDF files from `data/raw`, or generates synthetic data as a fallback.
-- Computes tail-risk signals from volatility and momentum.
-- Builds a climate graph and trains a PyTorch Geometric model to propagate systemic risk.
-- Computes Koppen-Geiger climate classes to stabilize intervention suitability across biomes.
-- Simulates interventions across a 20+ catalog (coastal, agriculture, water, urban, wetlands, fire, etc.).
-- Computes resilience ROI, loss avoided, eligible footprint, and uncertainty-adjusted ranges.
-- Renders climate-risk and intervention comparison videos.
-- Indexes generated videos into ChromaDB using Gemini Embedding 2 for native video-to-text retrieval.
-- Serves results in a Streamlit dashboard.
+SenTree answers one practical question:
+
+**"If we allocate adaptation capital today, where do we put it to avoid the most future loss?"**
+
+It is designed to feel like an investment decision cockpit:
+- `Recommendation` for portfolio and intervention ranking
+- `Evidence` for searchable videos, risk trajectories, and maps
+- `Model` for GNN playback and mathematical foundations
+
+## What Is New In The Current App
+
+Recent work focused on product clarity and investor usability:
+- Multi-level dashboard architecture (`Overview`, `Recommendation`, `Evidence`, `Model`)
+- Recommendation workflows with shortlist + portfolio strategy
+- Koppen-Geiger-aware intervention climate-fit explanations
+- Investor capital allocation controls (currently `$5M` to `$100M`)
+- AI resilience summary and decision-oriented KPI surface
+- Embedded React GNN playback support with Streamlit fallback
+- Semantic search wired to comparison videos for intervention-level retrieval
+- Visual polish pass (hero layout, typography hierarchy, card system)
+
+## Core Method
+
+1. Load climate data (ISIMIP when available, synthetic fallback otherwise)
+2. Compute tail-risk escalation features (momentum + volatility + self-excitation)
+3. Build graph and train GNN for systemic risk propagation
+4. Apply interventions with Koppen-Geiger compatibility constraints
+5. Compute avoided-loss and resilience ROI with uncertainty terms
+6. Render videos/maps and optionally index videos for semantic search
+
+## Architecture Map
+
+```text
+Data (ISIMIP/Synthetic)
+  -> Tail-Risk Engine (momentum, volatility, escalation)
+  -> Graph Construction
+  -> GNN Training + Inference
+  -> Intervention Simulation (Koppen-aware rules)
+  -> ROI + Uncertainty Metrics
+  -> Video/Map Rendering
+  -> Semantic Video Index (Gemini Embedding 2 + ChromaDB)
+  -> Streamlit Dashboard
+```
 
 ## Repository Layout
 
 ```text
 data/
-  generate_synthetic.py      Synthetic ISIMIP-like dataset generator
+  generate_synthetic.py          Synthetic climate dataset generator
 scripts/
-  run_pipeline.py            End-to-end pipeline runner
-  index_videos.py            Embeds generated videos into ChromaDB
+  run_pipeline.py                End-to-end climate -> model -> ROI -> media pipeline
+  index_videos.py                Semantic indexing into ChromaDB
+  run_dashboard.sh/.ps1          Launch Streamlit dashboard
+  run_gnn_playback.sh/.ps1       Launch React playback app
 src/
-  data/                      Loading and preprocessing
-  tail_risk/                 Volatility, momentum, tail-risk engine
-  graph/                     Graph construction
-  model/                     GNN model and training
-  simulation/                Intervention logic and ROI
-  rendering/                 Video/image rendering
-  embedding/                 Gemini/local embedding backends + ChromaDB
-  dashboard/                 Streamlit app
-setup.sh                     macOS/Linux setup
-setup.ps1                    Windows setup
-sentree_venv.py              Enforces running inside `.venv`
+  data/                          Loading, preprocessing, Koppen-Geiger logic
+  tail_risk/                     Escalation metrics and scoring
+  graph/                         Graph build
+  model/                         GNN model and training
+  simulation/                    Interventions + ROI logic
+  rendering/                     Video rendering/downscaling
+  embedding/                     Gemini/local embedders + vector DB
+  dashboard/                     Streamlit app
+apps/gnn-playback/               React playback frontend
 ```
 
 ## Requirements
 
-- Python 3.11+ (cluster runs commonly use 3.11; local runs may use newer).
-- `ffmpeg` must be available on `PATH` to render MP4 outputs.
-- A Gemini API key is required only for semantic video indexing and query embedding (Gemini Embedding 2).
+- Python 3.11+
+- ffmpeg on PATH for MP4 generation
+- Gemini API key only for semantic indexing/search (`GOOGLE_API_KEY` or `GEMINI_API_KEY`)
 
-Python packages are listed in `requirements.txt`.
+Install dependencies via setup scripts:
 
-## Setup
-
-### macOS / Linux
-
+macOS/Linux:
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-### Windows PowerShell
-
+Windows PowerShell:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-Both setup scripts:
-
-- create `.venv`
-- install `requirements.txt`
-- create `data/raw`, `data/processed`, `outputs/videos`, `outputs/roi`, and `outputs/embeddings`
-- warn if `ffmpeg` is missing
-
 ## Quick Start
 
-Run everything from the repository root.
+Run from repo root.
 
-### 1. Generate synthetic data
-
+1. Generate synthetic data:
 ```bash
 .venv/bin/python data/generate_synthetic.py
 ```
 
 Windows:
-
 ```powershell
 .\.venv\Scripts\python.exe data\generate_synthetic.py
 ```
 
-This creates `data/processed/climate_data.pkl`.
-
-### 2. Configure Gemini for semantic search
-
-If you want video indexing and text search, set one of:
-
-```bash
-export GOOGLE_API_KEY="your-key"
-```
-
-or add this to a local `.env` file:
-
-```env
-GOOGLE_API_KEY=your-key
-```
-
-If you skip this, the main pipeline and dashboard still work, but semantic indexing will fail.
-
-### 3. Run the pipeline
-
+2. Run pipeline:
 ```bash
 .venv/bin/python scripts/run_pipeline.py
 ```
 
-This pipeline:
-
-- loads climate data
-- computes tail-risk scores
-- trains the GNN
-- runs intervention simulations
-- writes ROI and timeseries JSON files
-- optionally renders MP4 videos and a tail-risk map
-
-#### Teammate-friendly runs (skip video rendering)
-
-If you’re iterating locally (synthetic data) and don’t want to generate lots of MP4s:
-
-- Disable **all** MP4 rendering:
-
-macOS/Linux (bash):
-```bash
-export SENTREE_NO_VIDEOS=1
-.venv/bin/python scripts/run_pipeline.py
-```
-
-Windows (PowerShell):
-```powershell
-$env:SENTREE_NO_VIDEOS = "1"
-python scripts/run_pipeline.py
-```
-
-- Keep the 3 core videos (baseline/tail-risk/KG) but skip per-intervention comparison videos:
-```bash
-export SENTREE_NO_COMPARISON_VIDEOS=1
-.venv/bin/python scripts/run_pipeline.py
-```
-
-Underlying flags (advanced):
-- `SENTREE_RENDER_VIDEOS=0` disables all MP4 rendering
-- `SENTREE_RENDER_CORE_VIDEOS=0` disables baseline/tail-risk/KG MP4s
-- `SENTREE_RENDER_COMPARISON_VIDEOS=0` disables per-intervention comparison MP4s
-- `SENTREE_RENDER_MAP_PNG=0` disables `outputs/tail_risk_map.png`
-
-### 4. Index rendered videos
-
+3. (Optional) index videos for semantic search:
 ```bash
 .venv/bin/python scripts/index_videos.py
 ```
 
-This stores embeddings in `outputs/embeddings` using ChromaDB.
-
-### 5. Launch the dashboard
-
+4. Launch dashboard:
 ```bash
 .venv/bin/python -m streamlit run src/dashboard/app.py
 ```
 
-Or use the launcher:
-
+Or launcher scripts:
 ```bash
 ./scripts/run_dashboard.sh
 ```
 
-Windows PowerShell:
-
+Windows:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run_dashboard.ps1
 ```
 
-### 6. Launch the React GNN playback app
-
+5. Launch React GNN playback app (optional):
 ```bash
 ./scripts/run_gnn_playback.sh
 ```
 
-Windows PowerShell:
-
+Windows:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run_gnn_playback.ps1
 ```
 
-This script:
+## Key Outputs
 
-- exports `outputs/roi/gnn_training_history.npz` into the React app's `public/data` folder
-- installs frontend dependencies on first run
-- starts the Vite development server on `http://127.0.0.1:4173`
-
-## Inputs and Data Sources
-
-SenTree supports two data modes:
-
-- Synthetic mode: generated by `data/generate_synthetic.py`, producing a 2015-2100 Southeast Asia coastal dataset with temperature, precipitation, GDP, population, soil moisture, coastal factor, hydrology, urban intensity, KÃ¶ppen-Geiger classes, and intervention suitability priors.
-- ISIMIP mode: if matching `ssp370 tas` NetCDF files are found in `data/raw`, the loader subsets them to Southeast Asia, resamples daily data to annual means, converts Kelvin to Celsius, synthesizes missing precipitation and socioeconomic proxy layers, and computes KÃ¶ppen-Geiger classes.
-
-The loader logic lives in `src/data/load_isimip.py`.
-
-## Outputs
-
-After `scripts/run_pipeline.py`, the main outputs are:
-
+After `scripts/run_pipeline.py`:
 - `outputs/roi/roi_results.json`
 - `outputs/roi/risk_timeseries.json`
-- `outputs/roi/opportunity_map.npz` (for interactive dashboard overlay)
+- `outputs/roi/opportunity_map.npz`
 - `outputs/roi/gnn_training_history.npz`
+- `outputs/videos/comparison_<intervention_key>.mp4`
 - `outputs/videos/baseline_risk.mp4`
 - `outputs/videos/tail_risk_escalation.mp4`
 - `outputs/videos/climate_classification_shift.mp4`
-- `outputs/videos/comparison_<intervention_key>.mp4` (one per intervention)
 - `outputs/tail_risk_map.png`
 
-After `scripts/index_videos.py`, the vector store is persisted in:
+After `scripts/index_videos.py`:
+- `outputs/embeddings/` (ChromaDB persistence)
 
-- `outputs/embeddings`
+## Dashboard Structure
 
-## Core Workflow
+The Streamlit dashboard is organized for narrative decision flow:
 
-1. Climate data is loaded or generated.
-2. Tail-risk escalation is computed from momentum and volatility signals.
-3. Node features are assembled into a climate graph.
-4. A PyTorch Geometric model learns node-level climate risk.
-5. Interventions perturb graph features and produce counterfactual outcomes.
-6. ROI is computed from avoided loss and uncertainty terms.
-7. The model output is rendered into videos and charts.
-8. Videos can be embedded for semantic retrieval in the dashboard.
+- `Overview`: mission snapshot + research foundations
+- `Recommendation`:
+  - `Brief`: top interventions, climate fit, portfolio strategy
+  - `Comparison`: ROI/loss/risk-reduction chart and table
+- `Evidence`:
+  - `Search`: semantic retrieval over intervention videos
+  - `Videos`: comparison/core/grid playback
+  - `Risk Over Time`: intervention trajectory analysis
+  - `Map`: opportunity and tail-risk geography
+- `Model`:
+  - `GNN Playback`: embedded React app or Streamlit fallback
+  - `Math Foundations`: equations and method explanations
 
-## Dashboard Features
+## Semantic Search Notes
 
-The Streamlit app in `src/dashboard/app.py` includes:
+- Uses Gemini Embedding 2 via `src/embedding/gemini_embedder.py`
+- Performs native vector similarity over video representations
+- Avoids transcript-RAG dependency for retrieval behavior
+- Works best after comparison videos are rendered and indexed
 
-- intervention comparison metrics (ROI, loss avoided, eligible footprint)
-- generated simulation videos
-- ROI summaries
-- a risk-over-time chart
-- a tail-risk map
-- a semantic search box backed by ChromaDB when videos have been indexed
+## Configuration Notes
 
-If indexing has not been run, the dashboard still loads and falls back to local outputs and demo behavior.
+Useful env flags:
+- `SENTREE_RENDER_VIDEOS=0` disable all video rendering
+- `SENTREE_RENDER_COMPARISON_VIDEOS=0` disable per-intervention videos
+- `SENTREE_RENDER_CORE_VIDEOS=0` disable baseline/tail/KG core videos
+- `SENTREE_RENDER_MAP_PNG=0` disable `tail_risk_map.png`
 
-## Notes and Limitations
+## Current Scope And Caveats
 
-- The repo enforces use of a virtual environment through `sentree_venv.py`.
-- `ffmpeg` is required for MP4 generation. Without it, rendering will fail.
-- Gemini embedding requires `GOOGLE_API_KEY` or `GEMINI_API_KEY` and uses Gemini Embedding 2.
-- The current indexing script assumes videos already exist in `outputs/videos`.
-- This is a prototype codebase optimized for end-to-end demonstration, not a production deployment.
+- Prototype tuned for fast demo iteration, not production hardening
+- ROI and confidence are simulation outputs and should be treated as decision support, not financial guarantees
+- Search quality depends on rendered video quality and index coverage
+- Running in `.venv` is enforced by `sentree_venv.py`
 
-## Parallel comparison-video rendering (Slurm array)
-
-For many interventions (e.g., 20+), render comparison MP4s outside the main pipeline:
-
-1) Run pipeline once and save per-intervention risk series:
-```bash
-export SENTREE_SAVE_RISK_SERIES_NPZ=1
-export SENTREE_RENDER_COMPARISON_VIDEOS=0
-.venv/bin/python scripts/run_pipeline.py
-```
-
-2) Generate the intervention key list:
-```bash
-.venv/bin/python scripts/export_intervention_keys.py --out-dir outputs/roi/risk_series
-```
-
-3) Submit the render array:
-```bash
-bash scripts/submit_render_comparisons.sh
-```
-
-4) Summarize per-video render time:
-```bash
-.venv/bin/python scripts/summarize_render_timings.py
-```
-
-## Mega video (grid of interventions)
-
-Render a single MP4 where baseline + all interventions appear simultaneously in a grid:
-```bash
-.venv/bin/python scripts/render_megavideo_from_npz.py --mode grid --ncols 6 --out outputs/videos/interventions_grid.mp4
-```
-
-## Main Commands
+## One-Command Flow (Typical)
 
 ```bash
 ./setup.sh

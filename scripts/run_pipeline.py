@@ -372,3 +372,7 @@ try:
     print(f"Saved timing JSON: {TIMINGS_OUTPUT_PATH}")
 except Exception as e:
     print(f"WARNING: failed to write timing JSON ({e})")
+
+if not render_comparisons:
+    print("NOTE: comparison videos were skipped (SENTREE_RENDER_COMPARISON_VIDEOS=0).")
+    print("      To render them in parallel via Slurm array, run:  bash scripts/submit_render_comparisons.sh")

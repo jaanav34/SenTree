@@ -4,6 +4,9 @@ Köppen-Geiger Climate Classification Engine (Corrected).
 Stabilizes GNN risk scores by providing categorical climate priors.
 Handles Kelvin -> Celsius and daily flux -> monthly/annual total precipitation.
 """
+import os
+import platform
+import multiprocessing as mp
 import numpy as np
 
 # Numerical mapping for the classifications (0-31)
@@ -100,13 +103,83 @@ def classify_koppen_geiger(temp_monthly, precip_monthly, is_kelvin=True, is_dail
     return code, KG_MAP.get(code, 0)
 
 def classify_grid(tas_monthly, pr_monthly, is_kelvin=True, is_daily_flux=True):
-    """Returns (T, nlat, nlon) numerical KG codes."""
+    """
+    Returns (T, nlat, nlon) numerical KG codes.
+
+    Performance:
+      - Default behavior is single-process to avoid "cooking" laptops.
+      - On Linux clusters you can opt into CPU parallelism by setting:
+          SENTREE_KG_WORKERS=<n>
+        (recommended: match Slurm `--cpus-per-task`).
+
+    Note: Parallel mode is Linux-only by default (macOS/Windows use `spawn` and
+    can copy huge arrays, which is both slow and resource-heavy).
+    """
     T, M, nlat, nlon = tas_monthly.shape
     results = np.zeros((T, nlat, nlon), dtype=np.int32)
-    for t in range(T):
-        for i in range(nlat):
+
+    workers = int(os.environ.get("SENTREE_KG_WORKERS", "1") or "1")
+    system = platform.system().lower()
+    allow_parallel = (workers > 1) and (system == "linux")
+
+    if not allow_parallel:
+        for t in range(T):
+            for i in range(nlat):
+                for j in range(nlon):
+                    _, val = classify_koppen_geiger(
+                        tas_monthly[t, :, i, j],
+                        pr_monthly[t, :, i, j],
+                        is_kelvin,
+                        is_daily_flux,
+                    )
+                    results[t, i, j] = val
+        return results
+
+    # --- Parallel path (Linux only) ---
+    # Use fork so workers share the large numpy arrays without pickling copies.
+    ctx = mp.get_context("fork")
+
+    global _KG_TAS, _KG_PR, _KG_IS_KELVIN, _KG_IS_DAILY_FLUX
+    _KG_TAS = tas_monthly
+    _KG_PR = pr_monthly
+    _KG_IS_KELVIN = bool(is_kelvin)
+    _KG_IS_DAILY_FLUX = bool(is_daily_flux)
+
+    def _init_worker(tas_ref, pr_ref, is_kelvin_ref, is_daily_flux_ref):
+        global _KG_TAS, _KG_PR, _KG_IS_KELVIN, _KG_IS_DAILY_FLUX
+        _KG_TAS = tas_ref
+        _KG_PR = pr_ref
+        _KG_IS_KELVIN = is_kelvin_ref
+        _KG_IS_DAILY_FLUX = is_daily_flux_ref
+
+    def _classify_lat_band(task):
+        t, i0, i1 = task
+        out = np.zeros((i1 - i0, nlon), dtype=np.int32)
+        for ii, i in enumerate(range(i0, i1)):
             for j in range(nlon):
-                _, val = classify_koppen_geiger(tas_monthly[t, :, i, j], pr_monthly[t, :, i, j], 
-                                                is_kelvin, is_daily_flux)
-                results[t, i, j] = val
+                _, val = classify_koppen_geiger(
+                    _KG_TAS[t, :, i, j],
+                    _KG_PR[t, :, i, j],
+                    _KG_IS_KELVIN,
+                    _KG_IS_DAILY_FLUX,
+                )
+                out[ii, j] = val
+        return t, i0, out
+
+    # Choose bands to keep task overhead reasonable.
+    band_rows = max(1, int(np.ceil(nlat / (workers * 6))))
+    tasks = []
+    for t in range(T):
+        for i0 in range(0, nlat, band_rows):
+            i1 = min(nlat, i0 + band_rows)
+            tasks.append((t, i0, i1))
+
+    with ctx.Pool(
+        processes=workers,
+        initializer=_init_worker,
+        initargs=(tas_monthly, pr_monthly, _KG_IS_KELVIN, _KG_IS_DAILY_FLUX),
+    ) as pool:
+        for t, i0, band in pool.imap_unordered(_classify_lat_band, tasks, chunksize=1):
+            results[t, i0 : i0 + band.shape[0], :] = band
+
     return results

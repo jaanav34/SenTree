@@ -75,7 +75,16 @@ def _precompute_series(data):
     tail_risk_series = np.stack(smoothed_scores, axis=0)   # (T, nlat, nlon)
 
     # KG grids (T, nlat, nlon) integer class labels
-    kg_grids = classify_grid(data["tas_monthly"], data["pr_monthly"])
+    kg_grids = None
+    existing_kg = data.get("kg_codes")
+    if isinstance(existing_kg, np.ndarray):
+        existing_kg = np.asarray(existing_kg)
+        if existing_kg.shape[:1] == (T,):
+            kg_grids = existing_kg.astype(np.int32, copy=False)
+
+    if kg_grids is None:
+        kg_grids = classify_grid(data["tas_monthly"], data["pr_monthly"])
+        data["kg_codes"] = kg_grids
 
     return {
         "temp_vol":   temp_vol_series,

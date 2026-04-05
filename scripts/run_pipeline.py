@@ -48,7 +48,20 @@ print(f"  Region: {region} | Coarsen: {coarsen}x | Intervention strength: {inter
 
 # Precompute Köppen-Geiger codes for climate-relative stabilization
 print("  Precomputing Köppen-Geiger climate classification...")
-data['kg_codes'] = classify_grid(data['tas_monthly'], data['pr_monthly'])
+kg_cache_path = f"data/processed/kg_codes_{region}_c{int(coarsen)}.npz"
+try:
+    kg_cached = np.load(kg_cache_path, allow_pickle=False)
+    kg_series = kg_cached["kg_codes"].astype(np.int32)
+    if kg_series.shape[:1] != (len(years),):
+        raise ValueError(f"cached kg_codes has wrong time dim: {kg_series.shape}")
+    data["kg_codes"] = kg_series
+    print(f"  Loaded cached KG codes from {kg_cache_path}")
+except Exception:
+    kg_series = classify_grid(data['tas_monthly'], data['pr_monthly'])
+    data["kg_codes"] = kg_series.astype(np.int32)
+    os.makedirs("data/processed", exist_ok=True)
+    np.savez_compressed(kg_cache_path, kg_codes=data["kg_codes"], years=np.asarray(years, dtype=np.int32))
+    print(f"  Saved cached KG codes to {kg_cache_path}")
 
 # 2. Compute tail risk (Gurjar & Camp 2026 + Hawkes process)
 print("\n[2/7] Computing tail-risk scores...")
@@ -182,10 +195,6 @@ with open("outputs/roi/risk_timeseries.json", "w") as f:
 # Tail-risk flags per timestep (using full Gurjar & Camp engine)
 print("  Computing per-timestep tail-risk flags...")
 _scores_series, flags_series, _regime_series = compute_tail_risk_series(data)
-
-# Köppen-Geiger climate classification series
-print("  Computing Köppen-Geiger climate classification series...")
-kg_series = classify_grid(data['tas_monthly'], data['pr_monthly'])
 
 # Render all videos (pass year_labels for correct annotation)
 year_labels = years

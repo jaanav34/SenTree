@@ -817,15 +817,14 @@ def render_training_frame(viz_placeholder, metrics_placeholder, training, epoch_
     plt.close(fig)
 
 
-def build_risk_timeseries_figure(ts, metric):
+def build_risk_timeseries_figure(ts, metric, intervention_key=None, intervention_name=None):
     years = np.array(ts["years"])
     fig, ax = plt.subplots(figsize=(12.8, 4.6))
 
     series = [("Baseline", ts["baseline"][metric], "#17342f")]
-    if "mangrove_restoration" in ts:
-        series.append(("Mangrove Restoration", ts["mangrove_restoration"][metric], "#0f766e"))
-    if "regenerative_agriculture" in ts:
-        series.append(("Regenerative Agriculture", ts["regenerative_agriculture"][metric], "#b45309"))
+    if intervention_key and intervention_key in ts:
+        label = intervention_name or intervention_key.replace("_", " ").title()
+        series.append((label, ts[intervention_key][metric], "#0f766e"))
 
     for name, values, color in series:
         values_arr = np.array(values)
@@ -834,7 +833,7 @@ def build_risk_timeseries_figure(ts, metric):
 
     ax.set_title("Systemic Risk Trajectory", loc="left", fontsize=14, fontweight="bold")
     ax.set_xlabel("Year")
-    ax.set_ylabel(metric.upper())
+    ax.set_ylabel("P95 RISK" if metric == "p95" else metric.upper())
     ax.grid(alpha=0.16)
     ax.legend(frameon=False, loc="upper left", ncols=len(series))
     ax.set_facecolor("#fffdf7")
@@ -1175,7 +1174,7 @@ if active_view == "GNN Playback":
             st.session_state.training_playing = False
         st.session_state.training_epoch_idx = min(max(int(st.session_state.training_epoch_idx), 0), total_epochs - 1)
 
-        control_cols = st.columns([4, 1, 1, 1, 1.2, 1.2])
+        control_cols = st.columns([4, 1, 1, 1, 1.2])
         epoch_selected = control_cols[0].slider(
             "Epoch",
             min_value=1,
@@ -1192,7 +1191,6 @@ if active_view == "GNN Playback":
         pause_btn = control_cols[2].button("Pause", use_container_width=True, key="training_pause_btn")
         reset_btn = control_cols[3].button("Reset", use_container_width=True, key="training_reset_btn")
         playback_speed = control_cols[4].selectbox("Speed", ["Slow", "Medium", "Fast"], index=1, key="training_speed")
-        show_edges = control_cols[5].checkbox("Show graph", value=True, key="training_show_graph")
         highlight_targets = st.checkbox("Highlight hardest tail-risk targets", value=True)
 
         if play_btn:
@@ -1214,7 +1212,7 @@ if active_view == "GNN Playback":
             metrics_placeholder,
             training,
             st.session_state.training_epoch_idx,
-            show_edges=show_edges,
+            show_edges=True,
             highlight_targets=highlight_targets,
         )
 
@@ -1260,8 +1258,17 @@ if active_view == "Dashboard":
     if ts is None:
         st.info("Risk time series not found yet. Re-run the pipeline to generate `outputs/roi/risk_timeseries.json`.")
     else:
-        metric = st.selectbox("Metric", ["mean", "p95", "max"], index=0)
-        fig = build_risk_timeseries_figure(ts, metric)
+        intervention_keys = [k for k in ts.keys() if k not in {"years", "baseline"}]
+        intervention_options = [("Baseline", None)]
+        for key in intervention_keys:
+            label = INTERVENTIONS.get(key, {}).get("name", key.replace("_", " ").title())
+            intervention_options.append((label, key))
+
+        labels = [opt[0] for opt in intervention_options]
+        choice = st.radio("Intervention", labels, horizontal=True)
+        chosen_key = dict(intervention_options).get(choice)
+
+        fig = build_risk_timeseries_figure(ts, "p95", chosen_key, choice if chosen_key else None)
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
 

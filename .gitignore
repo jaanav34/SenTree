@@ -13,8 +13,12 @@ __pycache__/
 .claude/
 .synq/
 apps/gnn-playback/node_modules/
-apps/gnn-playback/dist/
+# dist/ is committed so Streamlit Cloud can serve the pre-built React app
+# apps/gnn-playback/dist/
 apps/gnn-playback/public/data/gnn_training_history.json
+.cache/
+sentree-outputs.tar.gz
 apps/gnn-playback/*.tsbuildinfo
 apps/gnn-playback/vite.config.js
 apps/gnn-playback/vite.config.d.ts
+*.clipchamp

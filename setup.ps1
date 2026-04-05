@@ -149,8 +149,8 @@ Ensure-VenvPip
 Write-Host "Upgrading pip..."
 Invoke-Checked $venvPython "-m" "pip" "install" "--upgrade" "pip"
 
-Write-Host "Installing requirements.txt (venv-only)..."
-Invoke-Checked $venvPython "-m" "pip" "install" "--require-virtualenv" "-r" "requirements.txt"
+Write-Host "Installing requirements-pipeline.txt (venv-only)..."
+Invoke-Checked $venvPython "-m" "pip" "install" "--require-virtualenv" "-r" "requirements-pipeline.txt"
 
 # System dependency: ffmpeg (required to render MP4s)
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -and -not $env:SENTREE_FFMPEG_PATH -and -not $env:SENTREE_FFMPEG) {

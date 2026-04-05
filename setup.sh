@@ -29,7 +29,7 @@ if [ ! -x "$VENV_PY" ]; then
 fi
 
 "$VENV_PY" -m pip install --upgrade pip
-"$VENV_PY" -m pip install --require-virtualenv -r requirements.txt
+"$VENV_PY" -m pip install --require-virtualenv -r requirements-pipeline.txt
 
 # System dependency: ffmpeg (required to render MP4s)
 if ! command -v ffmpeg >/dev/null 2>&1; then

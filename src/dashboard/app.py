@@ -8,10 +8,28 @@ from textwrap import dedent
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, ROOT_DIR)
+os.chdir(ROOT_DIR)  # Streamlit Cloud launches from repo root but CWD may differ
+
+# On Streamlit Cloud the app runs inside the platform's own venv, so we
+# auto-set the bypass flag.  Locally, the venv check still applies.
+# Detection: Streamlit Cloud sets HOME=/home/appuser and runs from /mount/src/.
+_is_cloud = (
+    os.environ.get("STREAMLIT_SHARING_MODE")
+    or os.environ.get("IS_STREAMLIT_CLOUD")
+    or os.environ.get("HOME", "").startswith("/home/appuser")
+    or "/mount/src/" in os.path.abspath(__file__)
+)
+if _is_cloud:
+    os.environ["SENTREE_ALLOW_NO_VENV"] = "1"
 
 from sentree_venv import ensure_venv
 
 ensure_venv()
+
+# Download pre-computed outputs from GitHub Releases if not present locally
+from bootstrap_outputs import bootstrap as _bootstrap_outputs
+
+_bootstrap_outputs()
 
 import streamlit as st
 import pandas as pd
@@ -2333,20 +2351,28 @@ elif active_section == "Model":
 
         if playback_mode == "Embedded React app":
             import streamlit.components.v1 as components
-            default_url  = os.environ.get("SENTREE_GNN_PLAYBACK_URL", "http://localhost:4173/").strip()
-            playback_url = st.text_input(
-                "React app URL",
-                value=default_url,
-                help=(
-                    "This should be reachable from your laptop browser. "
-                    "When using SSH port forwarding, this is typically http://localhost:4173/."
-                ),
-                key="sentree_gnn_playback_url",
-            )
-            st.caption(
-                "If the embed is blank, verify the Vite dev server is running on the compute node and your SSH tunnel forwards its port."
-            )
-            components.iframe(playback_url, height=920, scrolling=True)
+
+            # Serve the pre-built React app from apps/gnn-playback/dist/
+            # This works on Streamlit Cloud (no Vite server needed) and locally.
+            _react_dist = Path(ROOT_DIR) / "apps" / "gnn-playback" / "dist"
+            if _react_dist.exists() and (_react_dist / "index.html").exists():
+                _playback_component = components.declare_component(
+                    "gnn_playback", path=str(_react_dist)
+                )
+                _playback_component(key="gnn_playback_embed", default=0, height=920)
+            else:
+                # Fallback: iframe to a running dev server (local dev only)
+                default_url = os.environ.get("SENTREE_GNN_PLAYBACK_URL", "http://localhost:4173/").strip()
+                playback_url = st.text_input(
+                    "React app URL",
+                    value=default_url,
+                    help=(
+                        "The pre-built React app was not found at apps/gnn-playback/dist/. "
+                        "Build it with: cd apps/gnn-playback && npm run build"
+                    ),
+                    key="sentree_gnn_playback_url",
+                )
+                components.iframe(playback_url, height=920, scrolling=True)
         else:
             training = load_training_history()
             if training is None:

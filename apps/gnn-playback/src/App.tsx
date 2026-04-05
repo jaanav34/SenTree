@@ -207,11 +207,22 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const playbackDataUrl = `${import.meta.env.BASE_URL}data/gnn_training_history.json`;
 
-    fetch("/data/gnn_training_history.json")
+    fetch(playbackDataUrl)
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
+        }
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          const body = await response.text();
+          if (body.trimStart().startsWith("<")) {
+            throw new Error(
+              "Playback data export is missing. Run `.venv/bin/python scripts/export_gnn_playback_data.py` from the repo root, then reload the app."
+            );
+          }
+          throw new Error(`Unexpected response format from ${playbackDataUrl}`);
         }
         return response.json() as Promise<PlaybackData>;
       })

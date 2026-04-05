@@ -7,7 +7,10 @@
       "WebSearch",
       "WebFetch(domain:gmd.copernicus.org)",
       "WebFetch(domain:publications.pik-potsdam.de)",
-      "Bash(.venv/Scripts/python.exe scripts/run_pipeline.py)"
+      "Bash(.venv/Scripts/python.exe scripts/run_pipeline.py)",
+      "Bash(.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\(''src/dashboard/app.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \":*)",
+      "Bash(timeout 15 .venv/Scripts/python.exe -m streamlit run src/dashboard/app.py --server.headless true --server.port 8502)"
     ]
   }
 }

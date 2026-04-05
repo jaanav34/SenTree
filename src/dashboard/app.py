@@ -1457,6 +1457,418 @@ with overview_tab:
         unsafe_allow_html=True,
     )
 
+    # ── Research Foundations ─────────────────────────────────────────
+    st.markdown("---")
+    st.markdown(
+        """
+        <div class="sentree-section">
+            <div class="sentree-section-label">Foundations</div>
+            <h2>Research papers and how they power SenTree</h2>
+            <p>
+                Every number in this dashboard traces back to a peer-reviewed method.
+                Below is a plain-language walkthrough of each paper we built on,
+                the exact equations we took from it, and precisely where they run in the codebase.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Paper 1: Gurjar & Camp 2026 ─────────────────────────────────
+    st.markdown(
+        """
+        <div class="sentree-card">
+            <h3>Paper 1 &mdash; Gurjar &amp; Camp (2026): EWMA Tail-Risk Detection</h3>
+            <p style="color: var(--sentree-ink-muted); font-size: 0.88rem; margin-bottom: 0.6rem;">
+                <em>"Exponentially Weighted Momentum Analysis for Climate Tipping-Point Detection"</em>
+            </p>
+            <p><strong>What it is, in plain English:</strong>
+                Imagine you are watching a thermometer every day. Some days are
+                hotter, some are cooler &mdash; the line zigzags. Gurjar &amp; Camp
+                proposed a way to smooth out the zigzag so you can see the
+                <em>real</em> trend, and then measure how <em>fast</em> that trend is
+                accelerating. If a location is warming quickly <em>and</em> the
+                warming is getting less predictable at the same time, the paper says
+                that location is approaching a tipping point &mdash; a regime where
+                small additional warming triggers disproportionately large damage.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Technical detail: EWMA smoothing, standardized momentum, and regime classification", expanded=False):
+        st.markdown(
+            dedent("""\
+                **Step 1 — EWMA Smoothing** (`src/tail_risk/volatility.py`)
+
+                Raw climate signals (temperature, precipitation) are noisy on a year-to-year basis.
+                Before we can measure meaningful acceleration, we need to strip out short-lived
+                weather noise while preserving genuine multi-year trends. Gurjar & Camp's
+                Exponentially Weighted Moving Average (EWMA) does this by giving recent observations
+                more weight than older ones, with exponential decay controlled by a single
+                parameter α:
+            """)
+        )
+        st.latex(r"\lambda(t) = \alpha \cdot X(t) + (1 - \alpha) \cdot \lambda(t-1), \quad \alpha = 0.3")
+        st.markdown(
+            dedent("""\
+                *In plain terms:* each year's smoothed value is 30% "what actually happened this year"
+                and 70% "what the trend was before." This means a single anomalously hot year won't
+                fool the system into thinking a tipping point is near, but a *sustained* warming
+                trend will show through clearly. The choice of α = 0.3 gives a half-life of about
+                2 years — fast enough to detect real shifts, slow enough to ignore noise.
+
+                ---
+
+                **Step 2 — Standardized Momentum** (`src/tail_risk/momentum.py`)
+
+                Once the signal is smoothed, we measure its *rate of change* — not in raw degrees,
+                but relative to how volatile the signal has been recently. This
+                "standardized momentum" is the key innovation from Gurjar & Camp:
+            """)
+        )
+        st.latex(r"m(t) = \frac{\lambda(t) - \lambda(t-1)}{\sigma_w(t) + \epsilon}")
+        st.markdown(
+            dedent("""\
+                where σ_w(t) is the rolling standard deviation over a local window of *w* = 7
+                timesteps, and ε = 10⁻⁸ prevents division by zero.
+
+                *Why this matters:* a +0.5°C jump means something very different in the stable
+                tropics versus the volatile monsoon belt. By dividing the change by local
+                volatility, we get a dimensionless number that is directly comparable across
+                every grid cell on the map — a momentum of 2.0 in Bangkok means the same
+                "relative acceleration" as a momentum of 2.0 in Jakarta.
+
+                ---
+
+                **Step 3 — Rolling Volatility of the Smoothed Signal** (`src/tail_risk/volatility.py`)
+
+                Volatility itself is a risk signal. We compute it as the rolling standard deviation
+                of the EWMA-smoothed series:
+            """)
+        )
+        st.latex(r"v(t) = \sqrt{\frac{1}{w}\sum_{i=t-w+1}^{t}\left[\lambda(i) - \bar{\lambda}_w\right]^2}")
+        st.markdown(
+            dedent("""\
+                *In plain terms:* this tells us how *stable* the trend itself is. A location whose
+                smoothed temperature is climbing steadily has low volatility. A location whose
+                smoothed temperature is lurching up and down has high volatility — and Gurjar & Camp
+                showed that rising volatility often *precedes* a regime shift, like tremors before an
+                earthquake.
+
+                ---
+
+                **Step 4 — Three-Regime Classification** (`src/tail_risk/engine.py`)
+
+                The paper classifies every grid cell into one of three regimes based on where it
+                sits in the volatility–momentum plane:
+
+                | Regime | Condition | Meaning |
+                |---|---|---|
+                | **Surge** (2) | vol > threshold **and** mom > threshold | Active crisis — both the trend and its instability are extreme |
+                | **Buildup** (1) | vol > threshold **or** mom > threshold | Pre-crisis — one signal is elevated, the other may follow |
+                | **Baseline** (0) | Neither elevated | Stable — no immediate concern |
+
+                The thresholds are set at the normalized 60th-percentile of volatility and the 65th-percentile
+                of momentum across the entire spatial grid, so the classification is always relative
+                to the current state of the map.
+
+                *In plain terms:* think of "Baseline" as green, "Buildup" as yellow, and "Surge" as
+                red. A node enters Surge only when the warming is *fast* and *unstable* at the same
+                time — the worst-case combination for triggering cascading losses downstream.
+            """)
+        )
+
+    # ── Paper 2: Hawkes Process ─────────────────────────────────────
+    st.markdown(
+        """
+        <div class="sentree-card">
+            <h3>Paper 2 &mdash; Hawkes (1971) / Ogata (1988): Self-Exciting Point Processes</h3>
+            <p style="color: var(--sentree-ink-muted); font-size: 0.88rem; margin-bottom: 0.6rem;">
+                <em>"Spectra of some self-exciting and mutually exciting point processes"</em> &amp;
+                <em>"Statistical Models for Earthquake Occurrences"</em>
+            </p>
+            <p><strong>What it is, in plain English:</strong>
+                Earthquakes cluster: once one occurs, aftershocks make the next one more likely.
+                Financial crises cluster: one bank failure makes the next more probable.
+                The Hawkes process is a mathematical model of exactly this &mdash; events that
+                <em>excite themselves</em>. We apply the same logic to climate extremes:
+                when a region has one heat record, the underlying system is primed, making
+                the next extreme <em>more</em> likely, not less. Ignoring this clustering
+                effect would systematically underestimate tail risk.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Technical detail: the Hawkes intensity kernel and how it enters the composite score", expanded=False):
+        st.markdown(
+            dedent("""\
+                **The Hawkes Conditional Intensity**  (`src/tail_risk/engine.py → _hawkes_intensity()`)
+
+                At each node, we track every timestep where the raw climate signal exceeded a high
+                threshold (the 90th-percentile of the first 25% of the time series — anchored to
+                an early baseline so the threshold doesn't drift upward with warming). Each
+                such exceedance is an "event." The Hawkes intensity at time *t* is:
+            """)
+        )
+        st.latex(r"\lambda^*(t) = \mu + \sum_{t_i < t} \beta \, e^{-\gamma (t - t_i)}")
+        st.markdown(
+            dedent("""\
+                | Symbol | Value | Meaning |
+                |---|---|---|
+                | μ | 0.1 | Background rate — the baseline probability of an extreme even with no recent history |
+                | β | 0.6 | Jump size — how much each past event raises the current intensity |
+                | γ | 0.8 | Decay rate — how quickly the memory of a past event fades (half-life ≈ 0.87 years) |
+
+                *In plain terms:* after an extreme year, the intensity jumps by 0.6 and then
+                decays back down exponentially. If *another* extreme hits before the first one has
+                decayed, the intensities stack — the system becomes self-exciting. Three consecutive
+                extreme years can push the Hawkes intensity well above 1.0, signaling a
+                self-reinforcing cluster.
+
+                ---
+
+                **How Hawkes enters the composite tail-risk score:**
+
+                The final per-node tail-risk score is a weighted blend of three components:
+            """)
+        )
+        st.latex(r"\text{Score} = 0.35 \times v_{norm} + 0.35 \times m_{norm} + 0.30 \times h_{norm}")
+        st.markdown(
+            dedent("""\
+                where *v*_norm is the normalized EWMA volatility, *m*_norm is the normalized
+                standardized momentum, and *h*_norm is the normalized Hawkes intensity.
+                All three are z-score standardized per Köppen-Geiger climate class (so a tropical
+                node is compared to other tropical nodes, not to polar ones), then rescaled to
+                [0, 1] via a global min-max pass.
+
+                Nodes whose composite score exceeds the 95th-percentile across the entire spatial
+                grid are flagged as **tail-risk escalation zones** — the red markers on the map.
+            """)
+        )
+
+    # ── Paper 3: Hess et al. 2023 ──────────────────────────────────
+    st.markdown(
+        """
+        <div class="sentree-card">
+            <h3>Paper 3 &mdash; Hess et al. (2023): CycleGAN-Inspired Downscaling</h3>
+            <p style="color: var(--sentree-ink-muted); font-size: 0.88rem; margin-bottom: 0.6rem;">
+                <em>"Physically constrained generative adversarial networks for improving precipitation fields from Earth system models"</em>
+            </p>
+            <p><strong>What it is, in plain English:</strong>
+                Climate models output data on a coarse grid &mdash; each pixel covers roughly
+                55 km &times; 55 km (0.5&deg;). That is too blurry to make investment decisions
+                at the city or district level. Hess et al. showed that a CycleGAN (a type of
+                image-to-image neural network) can add realistic local detail to coarse climate
+                maps, the same way AI upscaling sharpens a blurry photo. We adapt their core
+                ideas &mdash; gradient-aware texture injection, multi-scale smoothing, and
+                physical constraint enforcement &mdash; into a lightweight 4-stage algorithm
+                that runs in seconds rather than hours.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Technical detail: the 4-stage downscaling pipeline and physical constraints", expanded=False):
+        st.markdown(
+            dedent("""\
+                **Stage 1 — Bicubic Upsampling** (`src/rendering/downscale.py → downscale_grid()`)
+
+                The coarse grid (e.g., 71 × 81 at 0.5° resolution) is upsampled by a configurable
+                scale factor (default 8×) using bicubic interpolation. This produces a smooth,
+                high-resolution field — like zooming into a low-res photo. The result is physically
+                plausible but lacks fine-scale texture.
+
+                ---
+
+                **Stage 2 — Gradient-Aware Stochastic Texture Injection** (Hess et al.'s key insight)
+
+                Real climate fields are not smooth — they have local variations from topography,
+                land cover, and coastlines. Hess et al. showed that the *gradient magnitude* of the
+                coarse field tells you where local detail *should* vary most:
+            """)
+        )
+        st.latex(r"\text{texture}(x,y) = \mathcal{N}(0,\, \sigma_{base}) \times \left(1 + w_g \cdot |\nabla f(x,y)|\right)")
+        st.markdown(
+            dedent("""\
+                where σ_base = 0.02 controls the baseline texture amplitude, and *w*_g = 2.0
+                weights the gradient influence. In areas with strong spatial gradients (coastlines,
+                mountain edges), the noise is amplified; in flat interior regions, it stays subtle.
+
+                *In plain terms:* the system adds "realistic roughness" to the smooth upscaled
+                image, but only where the original coarse data suggests the terrain or climate
+                varies rapidly. A smooth ocean region stays smooth; a complex coastal boundary
+                gets more detail.
+
+                ---
+
+                **Stage 3 — Multi-Scale Gaussian Smoothing**
+
+                The stochastic texture can occasionally produce implausibly sharp features. A
+                two-pass Gaussian filter (σ₁ = 1.0 at fine scale, σ₂ = 0.5 at coarser scale)
+                blends the texture into the underlying field, preventing artifacts while preserving
+                the spatial structure that Stage 2 introduced.
+
+                ---
+
+                **Stage 4 — Local Contrast Enhancement**
+
+                A 15×15-pixel local mean is computed, and the deviation of each pixel from this
+                local mean is amplified by a factor of 1.3×. This increases the visual contrast of
+                real climate features (warm cores, cool coastal upwelling zones) without altering the
+                global statistics of the field.
+
+                ---
+
+                **Physical Constraint Enforcement** (`apply_physical_constraints()`)
+
+                Following Hess et al., every downscaled field is post-processed to enforce hard
+                physical bounds:
+
+                | Variable | Constraint | Reason |
+                |---|---|---|
+                | Precipitation | ≥ 0 mm/day | Rain cannot be negative |
+                | Temperature | −60°C to +60°C | Physically observed bounds on Earth |
+                | Risk scores | 0.0 to 1.0 | Normalized probability scale |
+
+                This guarantees that the stochastic texture injection never produces values that
+                violate basic physics — a critical requirement Hess et al. emphasize for
+                trustworthy downscaling.
+            """)
+        )
+
+    # ── Paper 4: Ito et al. 2020 ───────────────────────────────────
+    st.markdown(
+        """
+        <div class="sentree-card">
+            <h3>Paper 4 &mdash; Ito et al. (2020): Ensemble Uncertainty &amp; the FRA Metric</h3>
+            <p style="color: var(--sentree-ink-muted); font-size: 0.88rem; margin-bottom: 0.6rem;">
+                <em>"Fingers of uncertainty: the Fractional Range Analysis of ISIMIP impact-model ensembles"</em>
+            </p>
+            <p><strong>What it is, in plain English:</strong>
+                When multiple climate models try to predict the same future, they disagree.
+                Ito et al. asked: how much of that disagreement comes from precipitation
+                uncertainty? Their answer was the Fractional Range Analysis (FRA) metric, which
+                revealed that ISIMIP impact models capture less than 60% of real-world
+                precipitation variability. In other words, <em>the models are over-confident</em>.
+                We use FRA to inflate our uncertainty estimates so that investment committees
+                see honest confidence intervals rather than falsely tight ones.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("Technical detail: FRA computation, multi-source uncertainty, and Taylor Skill Score", expanded=False):
+        st.markdown(
+            dedent("""\
+                **The Fractional Range Analysis (FRA)** (`src/simulation/roi.py → _compute_fra()`)
+
+                FRA measures what fraction of the true range of outcomes a given model subset
+                captures:
+            """)
+        )
+        st.latex(r"FRA = \frac{R_{subset}}{R_{full}}")
+        st.markdown(
+            dedent("""\
+                where *R*_subset is the range (max − min) of risk predictions from the model subset,
+                and *R*_full is the range from the complete ensemble. Ito et al. found that for
+                precipitation-driven impacts, FRA ≈ 0.6 — meaning ISIMIP models span only about
+                60% of the true uncertainty range.
+
+                *In plain terms:* if you only listen to ISIMIP models, you think the future is
+                more predictable than it actually is. FRA tells us the correction factor: we
+                should widen our error bars by roughly 1/0.6 ≈ 1.67×.
+
+                In SenTree, since we typically use a single model run (GFDL-ESM4 SSP3-7.0), we
+                approximate an "ensemble" by splitting the temporal series into chunks and
+                treating each chunk as a pseudo-member. The resulting FRA is then used to
+                inflate precipitation uncertainty.
+
+                ---
+
+                **Multi-Source Uncertainty Decomposition** (`src/simulation/roi.py → compute_roi()`)
+
+                Following Ito et al.'s framework, SenTree decomposes total prediction uncertainty
+                into three independent sources, combined in quadrature:
+            """)
+        )
+        st.latex(r"U_{total} = \sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}")
+        st.markdown(
+            dedent("""\
+                Each component is computed differently:
+
+                | Source | How we estimate it | Typical value |
+                |---|---|---|
+                | **U_precip** | Coefficient of variation of precipitation × FRA correction (1/0.6) | ~0.39 |
+                | **U_model** | Spatial CV of risk reduction across all nodes — captures how unevenly the intervention works across the map | ~0.10 – 0.52 |
+                | **U_scenario** | Empirical SSP pathway spread: 0.15 × 1/√n_members — reflects how different emission scenarios diverge | ~0.07 |
+
+                The ROI confidence interval is then:
+            """)
+        )
+        st.latex(r"ROI_{bounds} = ROI \times (1 \pm U_{total})")
+        st.markdown(
+            dedent("""\
+                *In plain terms:* if U_total = 0.40, the true ROI could be 40% higher or
+                40% lower than the point estimate. This is the honest range an investment
+                committee should consider. Without the FRA correction, the range would look
+                misleadingly tight.
+
+                ---
+
+                **Taylor Skill Score** (`src/simulation/roi.py → compute_taylor_skill_score()`)
+
+                As a secondary diagnostic, we implement the Taylor (2001) skill score used by
+                Ito et al. to compare model skill:
+            """)
+        )
+        st.latex(r"S = \frac{4(1+R)}{(\hat{\sigma} + \hat{\sigma}^{-1})^2 \cdot (1+R_0)}")
+        st.markdown(
+            dedent("""\
+                where *R* is the pattern correlation between the model and a reference field,
+                σ̂ is the ratio of standard deviations, and *R*₀ is the maximum achievable
+                correlation. A score of 1.0 means perfect agreement; lower scores indicate the
+                model is missing spatial patterns or has incorrect variance — both of which
+                translate to investment risk.
+            """)
+        )
+
+    # ── How the papers connect ──────────────────────────────────────
+    st.markdown(
+        """
+        <div class="sentree-card">
+            <h3>How the four papers connect inside SenTree</h3>
+            <p>
+                The four methods are not independent modules &mdash; they form a pipeline where each paper's
+                output feeds the next:
+            </p>
+            <p>
+                <strong>1.</strong> Raw ISIMIP data (daily, 0.5&deg;) enters the <strong>Gurjar &amp; Camp EWMA engine</strong>,
+                which smooths, computes momentum/volatility, and classifies every grid cell into Baseline/Buildup/Surge.<br>
+                <strong>2.</strong> The <strong>Hawkes process</strong> runs in parallel on the same raw data, detecting
+                self-exciting clusters of extremes and contributing 30% of the composite tail-risk score.<br>
+                <strong>3.</strong> These scores become node features for a 4-layer <strong>Graph Neural Network</strong>
+                (GATConv + GCNConv hybrid with K&ouml;ppen-Geiger attention bias), which propagates risk through
+                geographic neighbor edges. The GNN outputs a per-node risk prediction for both the baseline
+                scenario and each intervention scenario.<br>
+                <strong>4.</strong> The <strong>Hess et al. downscaler</strong> upsamples the GNN's coarse risk maps
+                to high-resolution video frames with physically constrained stochastic texture, producing
+                the heatmap videos in the Evidence tab.<br>
+                <strong>5.</strong> The <strong>Ito et al. FRA metric</strong> inflates the uncertainty on ROI estimates
+                so the Recommendation tab shows honest confidence intervals. The Investor Score that ranks
+                interventions penalizes low-confidence strategies, ensuring the committee never over-allocates
+                to a high-ROI intervention whose error bars are wide.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 with recommendation_brief_tab:
     section_header(
         "Decide",

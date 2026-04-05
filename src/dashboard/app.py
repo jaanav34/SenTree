@@ -1089,21 +1089,46 @@ if active_view == "Dashboard":
         "Read the payoff of each resilience strategy across ROI, avoided loss, and risk reduction before drilling into the training playback.",
     )
 
-cols = st.columns(len(roi_data_adjusted))
-for i, (key, data) in enumerate(roi_data_adjusted.items()):
-    with cols[i]:
-        surface_card(
-            data['name'],
-            "Financial and systemic impact snapshot, adjusted to the investor capital slider.",
-        )
-        st.metric('Resilience ROI', f"{data['roi']:.2f}x",
-                   help=f"Range: {data.get('roi_lower', 0):.2f} - {data.get('roi_upper', 0):.2f}")
-        st.metric('Total Loss Avoided', f"${data.get('total_loss_avoided', 0)/1e9:.1f}B")
-        st.metric('Mean Risk Reduction', f"{data.get('mean_risk_reduction', 0):.1%}")
+roi_rows = []
+for key, data in roi_data_adjusted.items():
+    roi_rows.append({
+        "Intervention": data.get("name", key),
+        "ROI (x)": float(data.get("roi", 0.0)),
+        "Loss Avoided ($B)": float(data.get("total_loss_avoided", 0.0)) / 1e9,
+        "Mean Risk Reduction (%)": float(data.get("mean_risk_reduction", 0.0)) * 100.0,
+        "Tail-Risk Nodes Neutralized": int(data.get("tail_risk_nodes_neutralized", 0)),
+        "Eligible Footprint (%)": float(data.get("eligible_share", 0.0)) * 100.0,
+    })
 
-        tail_count = data.get('tail_risk_nodes_neutralized', 0)
-        if tail_count > 0:
-            st.error(f'Tail-Risk Nodes Neutralized: {tail_count}')
+roi_table = pd.DataFrame(roi_rows)
+if not roi_table.empty:
+    roi_table = roi_table.sort_values("ROI (x)", ascending=False, ignore_index=True)
+
+table_tab, chart_tab = st.tabs(["Table", "Chart"])
+with table_tab:
+    st.dataframe(
+        roi_table,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
+            "Loss Avoided ($B)": st.column_config.NumberColumn(format="%.2f"),
+            "Mean Risk Reduction (%)": st.column_config.NumberColumn(format="%.1f"),
+            "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.1f"),
+        },
+    )
+
+with chart_tab:
+    if not roi_table.empty:
+        chart_metric = st.selectbox(
+            "Chart Metric",
+            ["ROI (x)", "Loss Avoided ($B)", "Mean Risk Reduction (%)"],
+            index=0,
+        )
+        chart_df = roi_table.set_index("Intervention")[[chart_metric]].sort_values(chart_metric, ascending=False)
+        st.bar_chart(chart_df, use_container_width=True)
+    else:
+        st.info("ROI data not available yet. Run `python scripts/run_pipeline.py` first.")
 
 if active_view == "GNN Playback":
     training = load_training_history()

@@ -22,6 +22,39 @@ KG_MAP = {
 KG_LABELS = {v: k for k, v in KG_MAP.items()}
 DAYS_IN_MONTH = np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
 
+_KG_TAS = None
+_KG_PR = None
+_KG_IS_KELVIN = True
+_KG_IS_DAILY_FLUX = True
+
+
+def _kg_classify_lat_band(task):
+    """
+    Worker: classify a lat-band for a single timestep.
+
+    Args:
+        task: (t, i0, i1)
+    Returns:
+        (t, i0, band) where band is (i1-i0, nlon)
+    """
+    t, i0, i1 = task
+    if _KG_TAS is None or _KG_PR is None:
+        raise RuntimeError("KG worker globals not initialized (expected fork start method).")
+
+    nlon = int(_KG_TAS.shape[-1])
+    out = np.zeros((i1 - i0, nlon), dtype=np.int32)
+    for ii, i in enumerate(range(i0, i1)):
+        for j in range(nlon):
+            _, val = classify_koppen_geiger(
+                _KG_TAS[t, :, i, j],
+                _KG_PR[t, :, i, j],
+                _KG_IS_KELVIN,
+                _KG_IS_DAILY_FLUX,
+            )
+            out[ii, j] = val
+    return t, i0, out
+
+
 def classify_koppen_geiger(temp_monthly, precip_monthly, is_kelvin=True, is_daily_flux=True):
     """
     Classify a grid cell using standard KG rules with proper unit scaling.
@@ -139,32 +172,13 @@ def classify_grid(tas_monthly, pr_monthly, is_kelvin=True, is_daily_flux=True):
     # Use fork so workers share the large numpy arrays without pickling copies.
     ctx = mp.get_context("fork")
 
+    # IMPORTANT: Avoid passing large arrays through initializer args (can trigger pickling).
+    # With fork, children inherit these globals.
     global _KG_TAS, _KG_PR, _KG_IS_KELVIN, _KG_IS_DAILY_FLUX
     _KG_TAS = tas_monthly
     _KG_PR = pr_monthly
     _KG_IS_KELVIN = bool(is_kelvin)
     _KG_IS_DAILY_FLUX = bool(is_daily_flux)
-
-    def _init_worker(tas_ref, pr_ref, is_kelvin_ref, is_daily_flux_ref):
-        global _KG_TAS, _KG_PR, _KG_IS_KELVIN, _KG_IS_DAILY_FLUX
-        _KG_TAS = tas_ref
-        _KG_PR = pr_ref
-        _KG_IS_KELVIN = is_kelvin_ref
-        _KG_IS_DAILY_FLUX = is_daily_flux_ref
-
-    def _classify_lat_band(task):
-        t, i0, i1 = task
-        out = np.zeros((i1 - i0, nlon), dtype=np.int32)
-        for ii, i in enumerate(range(i0, i1)):
-            for j in range(nlon):
-                _, val = classify_koppen_geiger(
-                    _KG_TAS[t, :, i, j],
-                    _KG_PR[t, :, i, j],
-                    _KG_IS_KELVIN,
-                    _KG_IS_DAILY_FLUX,
-                )
-                out[ii, j] = val
-        return t, i0, out
 
     # Choose bands to keep task overhead reasonable.
     band_rows = max(1, int(np.ceil(nlat / (workers * 6))))
@@ -174,12 +188,8 @@ def classify_grid(tas_monthly, pr_monthly, is_kelvin=True, is_daily_flux=True):
             i1 = min(nlat, i0 + band_rows)
             tasks.append((t, i0, i1))
 
-    with ctx.Pool(
-        processes=workers,
-        initializer=_init_worker,
-        initargs=(tas_monthly, pr_monthly, _KG_IS_KELVIN, _KG_IS_DAILY_FLUX),
-    ) as pool:
-        for t, i0, band in pool.imap_unordered(_classify_lat_band, tasks, chunksize=1):
+    with ctx.Pool(processes=workers) as pool:
+        for t, i0, band in pool.imap_unordered(_kg_classify_lat_band, tasks, chunksize=1):
             results[t, i0 : i0 + band.shape[0], :] = band
 
     return results

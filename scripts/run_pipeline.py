@@ -185,6 +185,15 @@ with open('outputs/roi/roi_results.json', 'w') as f:
 # 7. Render videos
 print("\n[7/7] Rendering videos...")
 
+render_fps = int(os.environ.get("SENTREE_RENDER_FPS", "4"))
+render_scale = int(os.environ.get("SENTREE_RENDER_SCALE_FACTOR", "8"))
+render_comparisons = os.environ.get("SENTREE_RENDER_COMPARISON_VIDEOS", "1").strip().lower() not in {"0", "false", "no", "off"}
+render_only_keys_env = os.environ.get("SENTREE_RENDER_INTERVENTION_KEYS", "").strip()
+render_only_keys = None
+if render_only_keys_env:
+    render_only_keys = {k.strip() for k in render_only_keys_env.split(",") if k.strip()}
+save_risk_series = os.environ.get("SENTREE_SAVE_RISK_SERIES_NPZ", "0").strip().lower() in {"1", "true", "yes", "on"}
+
 with _timed(timings, "7a) build_temporal_features_raw"):
     temporal_features_raw = build_temporal_features_raw(data)
 with _timed(timings, "7b) build_temporal_features (fit/transform)"):
@@ -222,6 +231,25 @@ with _timed(timings, "7c) inference_series (baseline+interv)"):
             i_risk = predict(model, mod_data)
             intervention_risk_series[key].append(i_risk.reshape(nlat, nlon))
 
+if save_risk_series:
+    with _timed(timings, "7c2) save_risk_series_npz"):
+        os.makedirs("outputs/roi/risk_series", exist_ok=True)
+        baseline_stack = np.stack(baseline_risk_series, axis=0).astype(np.float16)
+        np.savez_compressed(
+            "outputs/roi/risk_series/baseline.npz",
+            baseline=baseline_stack,
+            years=np.asarray(years, dtype=np.int32),
+            lats=np.asarray(data["lats"], dtype=np.float64),
+            lons=np.asarray(data["lons"], dtype=np.float64),
+        )
+        for key, series in intervention_risk_series.items():
+            np.savez_compressed(
+                f"outputs/roi/risk_series/intervention_{key}.npz",
+                intervention=np.stack(series, axis=0).astype(np.float16),
+                key=str(key),
+            )
+        print("  Saved risk series npz files under outputs/roi/risk_series/")
+
 # Save quantitative time-series metrics
 def _series_stats(series_2d):
     return {
@@ -252,15 +280,15 @@ year_labels = years
 with _timed(timings, "7e) render_core_videos"):
     render_risk_video(baseline_risk_series, data['lats'], data['lons'],
                       'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk',
-                      year_labels=year_labels)
+                      year_labels=year_labels, fps=render_fps, scale_factor=render_scale)
 
     render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
                            'outputs/videos/tail_risk_escalation.mp4',
-                           year_labels=year_labels)
+                           year_labels=year_labels, fps=render_fps, scale_factor=render_scale)
 
     render_kg_video(kg_series, data['lats'], data['lons'],
                     'outputs/videos/climate_classification_shift.mp4',
-                    year_labels=year_labels)
+                    year_labels=year_labels, fps=render_fps)
 
 print("  Generating Strategic Resilience Opportunity Map...")
 # Logic: Map the DELTA (Baseline - Intervention) to show where value is created
@@ -280,7 +308,8 @@ with _timed(timings, "7f) opportunity_map (compute+render)"):
         data['lons'],
         'outputs/tail_risk_map.png',
         title='Strategic Resilience Opportunity & ROI Target Map',
-        label='Total Avoided Damage Potential (Risk Reduction)'
+        label='Total Avoided Damage Potential (Risk Reduction)',
+        scale_factor=render_scale,
     )
 
 # Save underlying grids for interactive dashboard overlays
@@ -303,6 +332,10 @@ for i in range(min(5, len(flagged_lats))):
 
 for key in INTERVENTIONS:
     name = INTERVENTIONS[key]['name']
+    if not render_comparisons:
+        continue
+    if render_only_keys is not None and key not in render_only_keys:
+        continue
     with _timed(timings, f"7g) render_comparison_video[{key}]"):
         render_comparison_video(
             baseline_risk_series, intervention_risk_series[key],
@@ -310,6 +343,8 @@ for key in INTERVENTIONS:
             f'outputs/videos/comparison_{key}.mp4',
             intervention_name=name,
             year_labels=year_labels,
+            fps=render_fps,
+            scale_factor=render_scale,
         )
 
 print("\n" + "=" * 60)

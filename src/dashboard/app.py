@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.collections import LineCollection
 
-from src.simulation.interventions import INTERVENTIONS
+from src.simulation.interventions import INTERVENTIONS, climate_fit_summary
 
 st.set_page_config(page_title='SenTree - Resilience ROI Dashboard', layout='wide', initial_sidebar_state="expanded")
 
@@ -545,6 +545,14 @@ def _format_money_short(value):
     return f"${value:,.0f}"
 
 
+def _confidence_proxy(entry):
+    u_precip = float(entry.get("u_precip", 0.0))
+    u_model = float(entry.get("u_model", 0.0))
+    u_scenario = float(entry.get("u_scenario", 0.0))
+    total_u = min(u_precip + u_model + u_scenario, 0.95)
+    return max(0.55, 1.0 - total_u)
+
+
 def _apply_capital_allocation(roi_data, capital_allocation):
     """Return ROI data adjusted for the capital allocation slider."""
     adjusted = {}
@@ -579,6 +587,77 @@ def _apply_capital_allocation(roi_data, capital_allocation):
 
 
 roi_data_adjusted = _apply_capital_allocation(roi_data, capital_allocation)
+
+
+def _build_investor_rank_table(roi_data_adjusted: dict) -> pd.DataFrame:
+    rows = []
+    for key, entry in roi_data_adjusted.items():
+        meta = INTERVENTIONS.get(key, {})
+        roi = float(entry.get("roi", 0.0))
+        confidence = float(_confidence_proxy(entry))
+        eligible_share = float(entry.get("eligible_share", 0.0))
+        tail_nodes = int(entry.get("tail_risk_nodes_neutralized", 0))
+        investor_score = roi * confidence * (0.6 + 0.4 * eligible_share) * (1.0 + 0.01 * tail_nodes)
+
+        rows.append(
+            {
+                "key": key,
+                "Intervention": entry.get("name", key.replace("_", " ").title()),
+                "Investor Score": investor_score,
+                "ROI (x)": roi,
+                "Loss Avoided ($M)": float(entry.get("total_loss_avoided", 0.0)) / 1e6,
+                "Confidence (%)": confidence * 100.0,
+                "Eligible Footprint (%)": eligible_share * 100.0,
+                "Tail-Risk Nodes": tail_nodes,
+                "Climate Fit": climate_fit_summary(meta) if meta else "broad climate applicability",
+            }
+        )
+
+    ranked = pd.DataFrame(rows)
+    if ranked.empty:
+        return ranked
+    return ranked.sort_values("Investor Score", ascending=False, ignore_index=True)
+
+
+def _portfolio_mix(top_df: pd.DataFrame, strategy: str) -> pd.DataFrame:
+    if top_df.empty:
+        return top_df
+    work = top_df.copy()
+
+    if strategy == "Conservative":
+        weight_base = (work["Confidence (%)"] / 100.0) * (work["Eligible Footprint (%)"] / 100.0)
+    elif strategy == "Aggressive":
+        weight_base = np.power(np.maximum(work["ROI (x)"], 0.0), 1.2)
+    else:
+        weight_base = np.maximum(work["Investor Score"], 0.0)
+
+    if float(weight_base.sum()) <= 1e-12:
+        work["Allocation Weight"] = 1.0 / len(work)
+    else:
+        work["Allocation Weight"] = weight_base / weight_base.sum()
+    return work
+
+
+def _build_investment_memo(top_df: pd.DataFrame, capital_allocation: float, strategy: str) -> str:
+    if top_df.empty:
+        return "No intervention data available. Run scripts/run_pipeline.py to generate ROI outputs."
+
+    lines = [
+        "SenTree Investment Committee Brief",
+        "=" * 34,
+        f"Total Capital Allocation: {_format_money_short(capital_allocation)}",
+        f"Portfolio Strategy: {strategy}",
+        "",
+        "Top Recommendations:",
+    ]
+    for i, row in top_df.iterrows():
+        lines.append(
+            f"{i+1}. {row['Intervention']} | ROI {row['ROI (x)']:.2f}x | "
+            f"Loss Avoided {_format_money_short(row['Loss Avoided ($M)'] * 1e6)} | "
+            f"Confidence {row['Confidence (%)']:.0f}%"
+        )
+        lines.append(f"   Climate fit: {row['Climate Fit']}")
+    return "\n".join(lines)
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -968,18 +1047,12 @@ training_history_path = "outputs/roi/gnn_training_history.npz"
 training_status = "Training snapshots ready" if os.path.exists(training_history_path) else "Run pipeline to generate playback"
 video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
 
-def _confidence_proxy(entry):
-    u_precip = float(entry.get("u_precip", 0.0))
-    u_model = float(entry.get("u_model", 0.0))
-    u_scenario = float(entry.get("u_scenario", 0.0))
-    total_u = min(u_precip + u_model + u_scenario, 0.95)
-    return max(0.55, 1.0 - total_u)
-
 summary_conf = _confidence_proxy(top_intervention)
 summary_tail = int(top_intervention.get("tail_risk_nodes_neutralized", 0))
 summary_name = top_intervention.get("name", "the selected intervention")
 summary_roi = float(top_intervention.get("roi", 0.0))
 summary_loss = _format_money_short(top_intervention.get("total_loss_avoided", 0.0))
+investor_rank = _build_investor_rank_table(roi_data_adjusted)
 
 st.markdown(
     f"""
@@ -1049,11 +1122,102 @@ st.caption(
 
 active_view = st.radio(
     "View",
-    ["Dashboard", "GNN Playback", "Math"],
+    ["Dashboard", "Investor Brief", "GNN Playback", "Math"],
     horizontal=True,
     label_visibility="collapsed",
     key="sentree_view",
 )
+
+if active_view == "Investor Brief":
+    section_header(
+        "Decide",
+        "Investment committee brief",
+        "A non-redundant shortlist that blends GNN impact, uncertainty confidence, and Koppen-Geiger climate fit.",
+    )
+    surface_card(
+        "How to read this",
+        "Tail-risk nodes are locations where modeled climate risk crosses the extreme (95th percentile) regime, meaning they are most likely to trigger cascading losses. "
+        "Investor Score is a blended ranking signal: ROI × confidence × eligible-footprint factor × tail-risk-neutralization bonus.",
+    )
+    if investor_rank.empty:
+        st.info("No intervention ROI results found yet. Run `python scripts/run_pipeline.py` first.")
+    else:
+        top_shortlist = investor_rank.head(5).copy()
+        brief_cols = st.columns([1.4, 1.1])
+        with brief_cols[0]:
+            st.markdown("**Top interventions (judge-ready shortlist)**")
+            st.dataframe(
+                top_shortlist[
+                    [
+                        "Intervention",
+                        "Investor Score",
+                        "ROI (x)",
+                        "Loss Avoided ($M)",
+                        "Confidence (%)",
+                        "Eligible Footprint (%)",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+                height=250,
+                column_config={
+                    "Investor Score": st.column_config.NumberColumn(format="%.2f"),
+                    "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
+                    "Loss Avoided ($M)": st.column_config.NumberColumn(format="%.1f"),
+                    "Confidence (%)": st.column_config.NumberColumn(format="%.0f"),
+                    "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.0f"),
+                },
+            )
+
+        with brief_cols[1]:
+            strategy = st.selectbox(
+                "Portfolio strategy",
+                ["Balanced", "Conservative", "Aggressive"],
+                index=0,
+                help="Balanced optimizes blended score, Conservative favors confidence and footprint, Aggressive favors higher ROI.",
+            )
+            top_three = _portfolio_mix(investor_rank.head(3), strategy)
+            top_three["Allocated Capital ($M)"] = (
+                top_three["Allocation Weight"] * (capital_allocation / 1e6)
+            )
+            blended_loss = float((top_three["Allocation Weight"] * top_three["Loss Avoided ($M)"]).sum() * 1e6)
+            blended_roi = blended_loss / max(float(capital_allocation), 1e-8)
+            st.metric("Portfolio ROI", f"{blended_roi:.2f}x")
+            st.metric("Portfolio Loss Avoided", _format_money_short(blended_loss))
+            mix_chart = (
+                alt.Chart(top_three)
+                .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+                .encode(
+                    x=alt.X("Allocated Capital ($M):Q", title="Capital Allocation ($M)"),
+                    y=alt.Y("Intervention:N", sort="-x", title=""),
+                    color=alt.Color("Intervention:N", legend=None, scale=alt.Scale(scheme="teals")),
+                    tooltip=[
+                        "Intervention",
+                        alt.Tooltip("Allocated Capital ($M):Q", format=".1f"),
+                        alt.Tooltip("ROI (x):Q", format=".2f"),
+                        alt.Tooltip("Confidence (%):Q", format=".0f"),
+                    ],
+                )
+                .properties(height=190)
+            )
+            st.altair_chart(mix_chart, use_container_width=True)
+
+            memo_text = _build_investment_memo(top_three, capital_allocation, strategy)
+            st.download_button(
+                "Download Investment Memo",
+                data=memo_text,
+                file_name="sentree_investment_memo.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+
+            with st.expander("Why these 3 interventions?", expanded=False):
+                for _, row in top_three.iterrows():
+                    st.markdown(
+                        f"**{row['Intervention']}**\n\n"
+                        f"Climate fit: {row['Climate Fit']}\n\n"
+                        f"Confidence: {row['Confidence (%)']:.0f}% | Tail-risk nodes neutralized: {int(row['Tail-Risk Nodes'])}"
+                    )
 
 if active_view == "Dashboard":
     section_header(

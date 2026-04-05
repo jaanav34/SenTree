@@ -11,6 +11,14 @@ from pathlib import Path
 
 
 def _save_animation(ani, output_path: str, *, fps: int, dpi: int = 100) -> None:
+    # Allow callers/environments (e.g., Slurm) to override DPI without changing code.
+    try:
+        dpi_env = os.environ.get("SENTREE_RENDER_DPI")
+        if dpi_env:
+            dpi = int(dpi_env)
+    except Exception:
+        pass
+
     ext = Path(output_path).suffix.lower()
 
     if ext == ".mp4":
@@ -35,7 +43,34 @@ def _save_animation(ani, output_path: str, *, fps: int, dpi: int = 100) -> None:
                 "Then restart your terminal and verify:  ffmpeg -version\n\n"
                 "Alternative: change output to a .gif and re-run."
             )
-        writer = animation.FFMpegWriter(fps=fps)
+
+        # ffmpeg can use more CPU threads for encoding; this typically speeds up
+        # rendering-heavy runs on clusters without affecting numerical outputs.
+        extra_args: list[str] = []
+        threads = os.environ.get("SENTREE_FFMPEG_THREADS") or os.environ.get("SENTREE_RENDER_THREADS")
+        if threads:
+            try:
+                n_threads = int(threads)
+                if n_threads > 0:
+                    extra_args += ["-threads", str(n_threads)]
+            except Exception:
+                pass
+
+        preset = os.environ.get("SENTREE_FFMPEG_PRESET")
+        if preset:
+            extra_args += ["-preset", str(preset)]
+
+        crf = os.environ.get("SENTREE_FFMPEG_CRF")
+        if crf:
+            try:
+                extra_args += ["-crf", str(int(crf))]
+            except Exception:
+                pass
+
+        # Improve broad player compatibility.
+        extra_args += ["-pix_fmt", "yuv420p"]
+
+        writer = animation.FFMpegWriter(fps=fps, extra_args=extra_args if extra_args else None)
         ani.save(output_path, writer=writer, dpi=dpi)
         return
 

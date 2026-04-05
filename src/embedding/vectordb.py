@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 
 from src.embedding import embed_query
+from src.embedding.gemini_embedder import GeminiAPIKeyError
 
 
 def _looks_like_corrupt_hnsw_error(exc: Exception) -> bool:
@@ -85,8 +86,8 @@ class VideoSearchDB:
         )
 
     def query(self, query_text, n_results=5, use_gemini=True):
-        """Search for videos matching a text query."""
-        query_embedding = self._embed_text(query_text, use_gemini)
+        """Search for videos matching a text query in Gemini's shared embedding space."""
+        query_embedding = self._embed_query(query_text, use_gemini)
 
         try:
             results = self.collection.query(
@@ -104,30 +105,20 @@ class VideoSearchDB:
                 raise
         return results
 
-    def _embed_text(self, text, use_gemini=True):
-        """Embed query text."""
-        if use_gemini:
-            try:
-                return np.array(embed_query(text, backend="gemini"), dtype=np.float32)
-            except Exception as e:
-                print(f"Gemini text embed failed: {e}")
+    def _embed_query(self, text, use_gemini=True):
+        """Embed query text using the same Gemini model family as indexed videos."""
+        if not use_gemini:
+            raise ValueError("SenTree search is configured for Gemini embeddings only.")
 
-        # Fallback: CLIP text embedding
         try:
-            import open_clip
-            import torch
-            model, _, _ = open_clip.create_model_and_transforms(
-                'ViT-B-32', pretrained='laion2b_s34b_b79k'
-            )
-            tokenizer = open_clip.get_tokenizer('ViT-B-32')
-            with torch.no_grad():
-                tokens = tokenizer([text])
-                emb = model.encode_text(tokens)
-                emb = emb / emb.norm(dim=-1, keepdim=True)
-            return emb.squeeze().numpy()
-        except Exception:
-            print("WARNING: No embedding model available. Returning zeros.")
-            return np.zeros(768)
+            emb = np.array(embed_query(text, backend="gemini"), dtype=np.float32)
+        except GeminiAPIKeyError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Gemini query embedding failed: {e}") from e
+
+        norm = np.linalg.norm(emb) + 1e-8
+        return emb / norm
 
     def count(self):
         return self.collection.count()

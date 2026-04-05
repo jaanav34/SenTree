@@ -148,7 +148,7 @@ print("\n[5/7] Running simulations...")
 lons = data['lons']
 with _timed(timings, "5) run_all_simulations"):
     baseline_risk, sim_results = run_all_simulations(
-        model, graph_data, features_raw, positions, INTERVENTIONS, lons, scaler=scaler
+        model, graph_data, features_raw, positions, INTERVENTIONS, lons, scaler=scaler, strength=intervention_strength
     )
 
 # 6. Compute ROI (with Ito 2020 ensemble uncertainty)
@@ -164,6 +164,8 @@ with _timed(timings, "6) compute_roi (all interventions)"):
         roi_results[key] = {
             'name': result['name'],
             **roi,
+            'eligible_nodes': result['eligible_nodes'],
+            'eligible_share': result['eligible_share'],
             'tail_risk_nodes_neutralized': int((
                 (result['baseline_risk'] > np.percentile(result['baseline_risk'], 95)) &
                 (result['intervention_risk'] <= np.percentile(result['baseline_risk'], 95))
@@ -173,6 +175,7 @@ with _timed(timings, "6) compute_roi (all interventions)"):
         print(f"    ROI = {roi['roi']:.2f}x (range: {roi['roi_lower']:.2f} - {roi['roi_upper']:.2f})")
         print(f"    Loss avoided: ${roi['total_loss_avoided']:,.0f}")
         print(f"    Risk reduction: {roi['mean_risk_reduction']:.4f} (mean), {roi['max_risk_reduction']:.4f} (max)")
+        print(f"    Eligible footprint: {result['eligible_nodes']} nodes ({result['eligible_share']:.1%})")
         print(f"    Uncertainty: U_precip={roi['u_precip']:.3f}, U_model={roi['u_model']:.3f}, U_scenario={roi['u_scenario']:.3f}")
         print(f"    FRA (Ito 2020): {roi['fra']:.3f}")
 
@@ -182,42 +185,84 @@ with open('outputs/roi/roi_results.json', 'w') as f:
 # 7. Render videos
 print("\n[7/7] Rendering videos...")
 
-with _timed(timings, "7a) build_temporal_features_raw"):
-    temporal_features_raw = build_temporal_features_raw(data)
-with _timed(timings, "7b) build_temporal_features (fit/transform)"):
-    temporal_features, scaler = build_temporal_features(data)
+render_fps = int(os.environ.get("SENTREE_RENDER_FPS", "4"))
+render_scale = int(os.environ.get("SENTREE_RENDER_SCALE_FACTOR", "8"))
+render_videos = os.environ.get("SENTREE_RENDER_VIDEOS", "1").strip().lower() not in {"0", "false", "no", "off"}
+render_core_videos = render_videos and (os.environ.get("SENTREE_RENDER_CORE_VIDEOS", "1").strip().lower() not in {"0", "false", "no", "off"})
+render_map_png = os.environ.get("SENTREE_RENDER_MAP_PNG", "1").strip().lower() not in {"0", "false", "no", "off"}
+render_comparisons = render_videos and (os.environ.get("SENTREE_RENDER_COMPARISON_VIDEOS", "1").strip().lower() not in {"0", "false", "no", "off"})
+compute_time_series = os.environ.get("SENTREE_COMPUTE_TIME_SERIES", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+# Backwards-friendly aliases for teammates / quick runs.
+if os.environ.get("SENTREE_NO_VIDEOS", "").strip().lower() in {"1", "true", "yes", "on"}:
+    render_videos = False
+    render_core_videos = False
+    render_comparisons = False
+if os.environ.get("SENTREE_NO_COMPARISON_VIDEOS", "").strip().lower() in {"1", "true", "yes", "on"}:
+    render_comparisons = False
+render_only_keys_env = os.environ.get("SENTREE_RENDER_INTERVENTION_KEYS", "").strip()
+render_only_keys = None
+if render_only_keys_env:
+    render_only_keys = {k.strip() for k in render_only_keys_env.split(",") if k.strip()}
+save_risk_series = os.environ.get("SENTREE_SAVE_RISK_SERIES_NPZ", "0").strip().lower() in {"1", "true", "yes", "on"}
+
 baseline_risk_series = []
 intervention_risk_series = {key: [] for key in INTERVENTIONS}
+if compute_time_series:
+    with _timed(timings, "7a) build_temporal_features_raw"):
+        temporal_features_raw = build_temporal_features_raw(data)
+    with _timed(timings, "7b) build_temporal_features (fit/transform)"):
+        temporal_features, scaler = build_temporal_features(data)
 
 import torch
 from torch_geometric.data import Data as PyGData
 
-with _timed(timings, "7c) inference_series (baseline+interv)"):
-    for t in range(T):
-        feats = temporal_features[t]
-        feats_raw = temporal_features_raw[t]
-        temp_data = PyGData(
-            x=torch.from_numpy(np.asarray(feats, dtype=np.float32)),
-            edge_index=graph_data.edge_index,
-            pos=graph_data.pos,
-            num_nodes=graph_data.num_nodes,
-        )
-
-        b_risk = predict(model, temp_data)
-        baseline_risk_series.append(b_risk.reshape(nlat, nlon))
-
-        for key, interv in INTERVENTIONS.items():
-            mod_feats = apply_intervention(
-                feats_raw, positions, interv, lons, scaler=scaler, strength=intervention_strength
-            )
-            mod_data = PyGData(
-                x=torch.from_numpy(np.asarray(mod_feats, dtype=np.float32)),
+if compute_time_series:
+    with _timed(timings, "7c) inference_series (baseline+interv)"):
+        for t in range(T):
+            feats = temporal_features[t]
+            feats_raw = temporal_features_raw[t]
+            temp_data = PyGData(
+                x=torch.from_numpy(np.asarray(feats, dtype=np.float32)),
                 edge_index=graph_data.edge_index,
                 pos=graph_data.pos,
                 num_nodes=graph_data.num_nodes,
             )
-            i_risk = predict(model, mod_data)
-            intervention_risk_series[key].append(i_risk.reshape(nlat, nlon))
+
+            b_risk = predict(model, temp_data)
+            baseline_risk_series.append(b_risk.reshape(nlat, nlon))
+
+            for key, interv in INTERVENTIONS.items():
+                mod_feats = apply_intervention(
+                    feats_raw, positions, interv, lons, scaler=scaler, strength=intervention_strength
+                )
+                mod_data = PyGData(
+                    x=torch.from_numpy(np.asarray(mod_feats, dtype=np.float32)),
+                    edge_index=graph_data.edge_index,
+                    pos=graph_data.pos,
+                    num_nodes=graph_data.num_nodes,
+                )
+                i_risk = predict(model, mod_data)
+                intervention_risk_series[key].append(i_risk.reshape(nlat, nlon))
+
+if save_risk_series and compute_time_series:
+    with _timed(timings, "7c2) save_risk_series_npz"):
+        os.makedirs("outputs/roi/risk_series", exist_ok=True)
+        baseline_stack = np.stack(baseline_risk_series, axis=0).astype(np.float16)
+        np.savez_compressed(
+            "outputs/roi/risk_series/baseline.npz",
+            baseline=baseline_stack,
+            years=np.asarray(years, dtype=np.int32),
+            lats=np.asarray(data["lats"], dtype=np.float64),
+            lons=np.asarray(data["lons"], dtype=np.float64),
+        )
+        for key, series in intervention_risk_series.items():
+            np.savez_compressed(
+                f"outputs/roi/risk_series/intervention_{key}.npz",
+                intervention=np.stack(series, axis=0).astype(np.float16),
+                key=str(key),
+            )
+        print("  Saved risk series npz files under outputs/roi/risk_series/")
 
 # Save quantitative time-series metrics
 def _series_stats(series_2d):
@@ -227,16 +272,17 @@ def _series_stats(series_2d):
         "max": [float(x.max()) for x in series_2d],
     }
 
-risk_timeseries = {
-    "years": [int(y) for y in years],
-    "baseline": _series_stats(baseline_risk_series),
-}
-for key in INTERVENTIONS:
-    risk_timeseries[key] = _series_stats(intervention_risk_series[key])
+if compute_time_series:
+    risk_timeseries = {
+        "years": [int(y) for y in years],
+        "baseline": _series_stats(baseline_risk_series),
+    }
+    for key in INTERVENTIONS:
+        risk_timeseries[key] = _series_stats(intervention_risk_series[key])
 
-os.makedirs("outputs/roi", exist_ok=True)
-with open("outputs/roi/risk_timeseries.json", "w") as f:
-    json.dump(risk_timeseries, f, indent=2)
+    os.makedirs("outputs/roi", exist_ok=True)
+    with open("outputs/roi/risk_timeseries.json", "w") as f:
+        json.dump(risk_timeseries, f, indent=2)
 
 # Tail-risk flags per timestep (using full Gurjar & Camp engine)
 print("  Computing per-timestep tail-risk flags...")
@@ -246,18 +292,22 @@ with _timed(timings, "7d) compute_tail_risk_series"):
 # Render all videos (pass year_labels for correct annotation)
 year_labels = years
 
-with _timed(timings, "7e) render_core_videos"):
-    render_risk_video(baseline_risk_series, data['lats'], data['lons'],
-                      'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk',
-                      year_labels=year_labels)
+if render_core_videos:
+    if not compute_time_series:
+        print("  WARNING: SENTREE_RENDER_CORE_VIDEOS=1 but SENTREE_COMPUTE_TIME_SERIES=0; skipping core videos.")
+    else:
+        with _timed(timings, "7e) render_core_videos"):
+            render_risk_video(baseline_risk_series, data['lats'], data['lons'],
+                              'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk',
+                              year_labels=year_labels, fps=render_fps, scale_factor=render_scale)
 
-    render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
-                           'outputs/videos/tail_risk_escalation.mp4',
-                           year_labels=year_labels)
+            render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
+                                   'outputs/videos/tail_risk_escalation.mp4',
+                                   year_labels=year_labels, fps=render_fps, scale_factor=render_scale)
 
-    render_kg_video(kg_series, data['lats'], data['lons'],
-                    'outputs/videos/climate_classification_shift.mp4',
-                    year_labels=year_labels)
+            render_kg_video(kg_series, data['lats'], data['lons'],
+                            'outputs/videos/climate_classification_shift.mp4',
+                            year_labels=year_labels, fps=render_fps)
 
 print("  Generating Strategic Resilience Opportunity Map...")
 # Logic: Map the DELTA (Baseline - Intervention) to show where value is created
@@ -270,15 +320,17 @@ with _timed(timings, "7f) opportunity_map (compute+render)"):
         reduction = (sim_results[key]['baseline_risk'] - sim_results[key]['intervention_risk']).reshape(nlat, nlon)
         total_reduction_map += reduction
 
-    render_tail_risk_map(
-        total_reduction_map,
-        flags_series[-1],
-        data['lats'],
-        data['lons'],
-        'outputs/tail_risk_map.png',
-        title='Strategic Resilience Opportunity & ROI Target Map',
-        label='Total Avoided Damage Potential (Risk Reduction)'
-    )
+    if render_map_png:
+        render_tail_risk_map(
+            total_reduction_map,
+            flags_series[-1],
+            data['lats'],
+            data['lons'],
+            'outputs/tail_risk_map.png',
+            title='Strategic Resilience Opportunity & ROI Target Map',
+            label='Total Avoided Damage Potential (Risk Reduction)',
+            scale_factor=render_scale,
+        )
 
 # Save underlying grids for interactive dashboard overlays
 os.makedirs("outputs/roi", exist_ok=True)
@@ -300,6 +352,10 @@ for i in range(min(5, len(flagged_lats))):
 
 for key in INTERVENTIONS:
     name = INTERVENTIONS[key]['name']
+    if not render_comparisons:
+        continue
+    if render_only_keys is not None and key not in render_only_keys:
+        continue
     with _timed(timings, f"7g) render_comparison_video[{key}]"):
         render_comparison_video(
             baseline_risk_series, intervention_risk_series[key],
@@ -307,6 +363,8 @@ for key in INTERVENTIONS:
             f'outputs/videos/comparison_{key}.mp4',
             intervention_name=name,
             year_labels=year_labels,
+            fps=render_fps,
+            scale_factor=render_scale,
         )
 
 print("\n" + "=" * 60)
@@ -334,3 +392,13 @@ try:
     print(f"Saved timing JSON: {TIMINGS_OUTPUT_PATH}")
 except Exception as e:
     print(f"WARNING: failed to write timing JSON ({e})")
+
+if not render_comparisons:
+    print("NOTE: comparison videos were skipped (SENTREE_RENDER_COMPARISON_VIDEOS=0).")
+    print("      To render them in parallel via Slurm array, run:  bash scripts/submit_render_comparisons.sh")
+if not render_core_videos:
+    print("NOTE: core videos were skipped (SENTREE_RENDER_CORE_VIDEOS=0 or SENTREE_RENDER_VIDEOS=0).")
+if not render_map_png:
+    print("NOTE: tail_risk_map.png render was skipped (SENTREE_RENDER_MAP_PNG=0).")
+if not compute_time_series:
+    print("NOTE: time-series inference was skipped (SENTREE_COMPUTE_TIME_SERIES=0).")

@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +60,17 @@ def main() -> int:
     parser.add_argument("--hold-seconds", type=float, default=2.0, help="For single-frame mode, hold this many seconds.")
     parser.add_argument("--ncols", type=int, default=6, help="Grid columns for mode=grid.")
     parser.add_argument("--cmap", default="YlOrRd")
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Print progress updates (frame/year) to stderr so `tail -f` is useful.",
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=1,
+        help="Emit a progress line every N frames when --progress is enabled (default: 1).",
+    )
     args = parser.parse_args()
 
     keys: list[str] = []
@@ -108,6 +120,12 @@ def main() -> int:
     extent = [float(lons[0]), float(lons[-1]), float(lats[0]), float(lats[-1])]
 
     T = int(baseline.shape[0])
+    if args.progress:
+        print(
+            f"[mega] baseline={Path(args.baseline)} shape={tuple(baseline.shape)} years={int(years[0]) if years.size else 'NA'}..{int(years[-1]) if years.size else 'NA'}",
+            file=sys.stderr,
+            flush=True,
+        )
     if args.animate_years:
         frame_year_indices = list(range(T))
     else:
@@ -129,6 +147,13 @@ def main() -> int:
 
     if not keys:
         raise SystemExit(f"No intervention NPZs found under {args.series_dir}; cannot render mega video.")
+
+    if args.progress:
+        print(
+            f"[mega] loaded interventions={len(keys)} from series_dir={Path(args.series_dir)}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     # Baseline scale fixed for visual consistency.
     base_vmin = float(np.nanmin(baseline))
@@ -165,6 +190,12 @@ def main() -> int:
             delta = np.clip(base_grid - interventions[key][t_idx], 0.0, None)
             im1.set_data(delta)
             ax1.set_title(f"Risk Reduction — {names.get(key, key)}")
+            if args.progress and (frame % max(1, int(args.progress_every)) == 0):
+                print(
+                    f"[mega] frame {frame + 1}/{n_frames} year={year} key={key} ({key_idx + 1}/{len(keys)})",
+                    file=sys.stderr,
+                    flush=True,
+                )
             return [im1]
 
         ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=1000 // max(1, args.fps), blit=False)
@@ -233,6 +264,9 @@ def main() -> int:
         n_frames = max(1, int(round(args.hold_seconds * args.fps)))
         frame_year_indices = frame_year_indices * n_frames
 
+    n_frames_total = len(frame_year_indices)
+    t_start = time.perf_counter()
+
     def update(frame: int):
         t_idx = int(frame_year_indices[frame])
         yr = int(years[t_idx]) if years.size else (2015 + t_idx)
@@ -241,6 +275,13 @@ def main() -> int:
         ax_base.set_title(f"Baseline — {yr}", fontsize=10, loc="left")
         for key, im, _ax in ims_delta:
             im.set_data(np.clip(base_grid - interventions[key][t_idx], 0.0, None))
+        if args.progress and (frame % max(1, int(args.progress_every)) == 0):
+            elapsed = float(time.perf_counter() - t_start)
+            print(
+                f"[mega] frame {frame + 1}/{n_frames_total} year={yr} updated={len(ims_delta)} elapsed_s={elapsed:.1f}",
+                file=sys.stderr,
+                flush=True,
+            )
         return [im_base] + [im for _, im, _ in ims_delta]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frame_year_indices), interval=1000 // max(1, args.fps), blit=False)

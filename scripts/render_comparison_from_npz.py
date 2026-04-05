@@ -26,6 +26,7 @@ from sentree_venv import ensure_venv
 ensure_venv()
 
 from src.rendering.render_video import render_comparison_video
+from src.simulation.interventions import INTERVENTIONS
 
 
 def main() -> int:
@@ -58,7 +59,7 @@ def main() -> int:
             except Exception:
                 name = args.key
         else:
-            name = args.key
+            name = str(INTERVENTIONS.get(args.key, {}).get("name", args.key))
 
     b = np.load(baseline_path, allow_pickle=False)
     i = np.load(intervention_path, allow_pickle=False)

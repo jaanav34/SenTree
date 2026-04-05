@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -33,13 +34,22 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 from src.rendering.render_video import _save_animation
+from src.simulation.interventions import INTERVENTIONS
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["grid", "cycle"], default="grid")
-    parser.add_argument("--keys", default="outputs/roi/risk_series/intervention_keys.txt")
-    parser.add_argument("--names", default="outputs/roi/risk_series/intervention_names.json")
+    parser.add_argument(
+        "--keys",
+        default=None,
+        help="Optional path to intervention_keys.txt. If omitted/missing, keys are discovered from NPZs in --series-dir or from INTERVENTIONS.",
+    )
+    parser.add_argument(
+        "--names",
+        default=None,
+        help="Optional path to intervention_names.json. If omitted/missing, names are taken from INTERVENTIONS.",
+    )
     parser.add_argument("--baseline", default="outputs/roi/risk_series/baseline.npz")
     parser.add_argument("--series-dir", default="outputs/roi/risk_series")
     parser.add_argument("--out", default="outputs/videos/interventions_megavideo.mp4")
@@ -50,22 +60,62 @@ def main() -> int:
     parser.add_argument("--hold-seconds", type=float, default=2.0, help="For single-frame mode, hold this many seconds.")
     parser.add_argument("--ncols", type=int, default=6, help="Grid columns for mode=grid.")
     parser.add_argument("--cmap", default="YlOrRd")
+    parser.add_argument(
+        "--grid-kind",
+        choices=["delta", "intervention"],
+        default="delta",
+        help="For mode=grid, render either risk reduction deltas (delta) or absolute intervention risk (intervention).",
+    )
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Print progress updates (frame/year) to stderr so `tail -f` is useful.",
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=1,
+        help="Emit a progress line every N frames when --progress is enabled (default: 1).",
+    )
     args = parser.parse_args()
 
-    keys_path = Path(args.keys)
-    if not keys_path.exists():
-        raise SystemExit(f"Missing keys file: {keys_path}")
-    keys = [k.strip() for k in keys_path.read_text(encoding="utf-8").splitlines() if k.strip()]
+    keys: list[str] = []
+    keys_path = Path(args.keys) if args.keys else None
+    if keys_path and keys_path.exists():
+        keys = [k.strip() for k in keys_path.read_text(encoding="utf-8").splitlines() if k.strip()]
+    else:
+        series_dir = Path(args.series_dir)
+        if series_dir.exists():
+            npz_keys = []
+            for p in sorted(series_dir.glob("intervention_*.npz")):
+                name = p.name
+                if not name.startswith("intervention_") or not name.endswith(".npz"):
+                    continue
+                npz_keys.append(name[len("intervention_") : -len(".npz")])
+            if npz_keys:
+                keys = npz_keys
+                print(f"Discovered {len(keys)} interventions from NPZs in {series_dir}.")
+        if not keys:
+            keys = sorted(INTERVENTIONS.keys())
+            msg = f"Using INTERVENTIONS from code ({len(keys)} keys)"
+            if keys_path:
+                msg = f"Keys file not found ({keys_path}); {msg}."
+            else:
+                msg = f"No keys file provided; {msg}."
+            print(msg)
+
     if not keys:
-        raise SystemExit(f"No keys found in {keys_path}")
+        raise SystemExit("No intervention keys available (no NPZs found and INTERVENTIONS is empty).")
 
     names = {}
-    names_path = Path(args.names)
-    if names_path.exists():
+    names_path = Path(args.names) if args.names else None
+    if names_path and names_path.exists():
         try:
             names = json.loads(names_path.read_text(encoding="utf-8"))
         except Exception:
             names = {}
+    if not names:
+        names = {k: str(INTERVENTIONS.get(k, {}).get("name", k)) for k in keys}
 
     b = np.load(Path(args.baseline), allow_pickle=False)
     baseline = b["baseline"].astype(np.float32)
@@ -76,6 +126,12 @@ def main() -> int:
     extent = [float(lons[0]), float(lons[-1]), float(lats[0]), float(lats[-1])]
 
     T = int(baseline.shape[0])
+    if args.progress:
+        print(
+            f"[mega] baseline={Path(args.baseline)} shape={tuple(baseline.shape)} years={int(years[0]) if years.size else 'NA'}..{int(years[-1]) if years.size else 'NA'}",
+            file=sys.stderr,
+            flush=True,
+        )
     if args.animate_years:
         frame_year_indices = list(range(T))
     else:
@@ -83,9 +139,27 @@ def main() -> int:
 
     # Preload interventions series (keeps render deterministic/fast; uses RAM).
     interventions = {}
+    missing = []
     for key in keys:
         p = Path(args.series_dir) / f"intervention_{key}.npz"
+        if not p.exists():
+            missing.append(key)
+            continue
         interventions[key] = np.load(p, allow_pickle=False)["intervention"].astype(np.float32)
+
+    if missing:
+        print(f"Skipping {len(missing)} interventions with no NPZ present under {args.series_dir}.")
+        keys = [k for k in keys if k in interventions]
+
+    if not keys:
+        raise SystemExit(f"No intervention NPZs found under {args.series_dir}; cannot render mega video.")
+
+    if args.progress:
+        print(
+            f"[mega] loaded interventions={len(keys)} from series_dir={Path(args.series_dir)} mode={args.mode} grid_kind={args.grid_kind} fps={args.fps}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     # Baseline scale fixed for visual consistency.
     base_vmin = float(np.nanmin(baseline))
@@ -122,6 +196,12 @@ def main() -> int:
             delta = np.clip(base_grid - interventions[key][t_idx], 0.0, None)
             im1.set_data(delta)
             ax1.set_title(f"Risk Reduction — {names.get(key, key)}")
+            if args.progress and (frame % max(1, int(args.progress_every)) == 0):
+                print(
+                    f"[mega] frame {frame + 1}/{n_frames} year={year} key={key} ({key_idx + 1}/{len(keys)})",
+                    file=sys.stderr,
+                    flush=True,
+                )
             return [im1]
 
         ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=1000 // max(1, args.fps), blit=False)
@@ -152,21 +232,58 @@ def main() -> int:
     ax_base.set_xticks([])
     ax_base.set_yticks([])
 
-    # Determine a stable delta color scale.
-    sample_t = int(frame_year_indices[0])
-    sample_deltas = []
-    for key in keys[: min(8, len(keys))]:
-        sample_deltas.append(np.clip(baseline[sample_t] - interventions[key][sample_t], 0.0, None))
-    stacked = np.stack(sample_deltas, axis=0) if sample_deltas else np.zeros((1,) + baseline[sample_t].shape, dtype=np.float32)
-    delta_vmax = float(np.nanpercentile(stacked, 99.5))
-    delta_vmax = max(delta_vmax, 1e-6)
+    delta_vmax = None
+    risk_vmin = base_vmin
+    risk_vmax = base_vmax
+    if args.grid_kind == "delta":
+        # Determine a stable delta color scale.
+        sample_t = int(frame_year_indices[0])
+        sample_deltas = []
+        for key in keys[: min(8, len(keys))]:
+            sample_deltas.append(np.clip(baseline[sample_t] - interventions[key][sample_t], 0.0, None))
+        stacked = (
+            np.stack(sample_deltas, axis=0)
+            if sample_deltas
+            else np.zeros((1,) + baseline[sample_t].shape, dtype=np.float32)
+        )
+        delta_vmax = float(np.nanpercentile(stacked, 99.5))
+        delta_vmax = max(delta_vmax, 1e-6)
+    else:
+        # Match the comparison-video semantics: use a shared vmin/vmax across
+        # baseline + all intervention grids so all panels are comparable.
+        risk_vmin = float(np.nanmin(baseline))
+        risk_vmax = float(np.nanmax(baseline))
+        for arr in interventions.values():
+            risk_vmin = float(min(risk_vmin, np.nanmin(arr)))
+            risk_vmax = float(max(risk_vmax, np.nanmax(arr)))
 
     ims_delta = []
     for idx, key in enumerate(keys, start=1):
         ax = axes[idx]
-        delta = np.clip(baseline[t0] - interventions[key][t0], 0.0, None)
-        im = ax.imshow(delta, origin="lower", extent=extent, cmap="Greens", vmin=0.0, vmax=delta_vmax, aspect="auto")
-        ax.set_title(names.get(key, key), fontsize=8, loc="left")
+        if args.grid_kind == "delta":
+            delta = np.clip(baseline[t0] - interventions[key][t0], 0.0, None)
+            im = ax.imshow(
+                delta,
+                origin="lower",
+                extent=extent,
+                cmap="Greens",
+                vmin=0.0,
+                vmax=float(delta_vmax),
+                aspect="auto",
+            )
+            ax.set_title(names.get(key, key), fontsize=8, loc="left")
+        else:
+            grid = interventions[key][t0]
+            im = ax.imshow(
+                grid,
+                origin="lower",
+                extent=extent,
+                cmap=args.cmap,
+                vmin=risk_vmin,
+                vmax=risk_vmax,
+                aspect="auto",
+            )
+            ax.set_title(f"With {names.get(key, key)}", fontsize=8, loc="left")
         ax.set_xticks([])
         ax.set_yticks([])
         ims_delta.append((key, im, ax))
@@ -180,15 +297,19 @@ def main() -> int:
         fig.colorbar(im_base, ax=ax_base, fraction=0.03, pad=0.01)
     except Exception:
         pass
-    try:
-        fig.colorbar(ims_delta[0][1], ax=[ax for _, _, ax in ims_delta], fraction=0.02, pad=0.01)
-    except Exception:
-        pass
+    if ims_delta:
+        try:
+            fig.colorbar(ims_delta[0][1], ax=[ax for _, _, ax in ims_delta], fraction=0.02, pad=0.01)
+        except Exception:
+            pass
 
     if len(frame_year_indices) == 1:
         # Single-frame video: repeat the same frame for hold-seconds.
         n_frames = max(1, int(round(args.hold_seconds * args.fps)))
         frame_year_indices = frame_year_indices * n_frames
+
+    n_frames_total = len(frame_year_indices)
+    t_start = time.perf_counter()
 
     def update(frame: int):
         t_idx = int(frame_year_indices[frame])
@@ -197,7 +318,17 @@ def main() -> int:
         im_base.set_data(base_grid)
         ax_base.set_title(f"Baseline — {yr}", fontsize=10, loc="left")
         for key, im, _ax in ims_delta:
-            im.set_data(np.clip(base_grid - interventions[key][t_idx], 0.0, None))
+            if args.grid_kind == "delta":
+                im.set_data(np.clip(base_grid - interventions[key][t_idx], 0.0, None))
+            else:
+                im.set_data(interventions[key][t_idx])
+        if args.progress and (frame % max(1, int(args.progress_every)) == 0):
+            elapsed = float(time.perf_counter() - t_start)
+            print(
+                f"[mega] frame {frame + 1}/{n_frames_total} year={yr} updated={len(ims_delta)} elapsed_s={elapsed:.1f}",
+                file=sys.stderr,
+                flush=True,
+            )
         return [im_base] + [im for _, im, _ in ims_delta]
 
     ani = animation.FuncAnimation(fig, update, frames=len(frame_year_indices), interval=1000 // max(1, args.fps), blit=False)

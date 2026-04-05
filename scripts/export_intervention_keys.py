@@ -29,12 +29,29 @@ from src.simulation.interventions import INTERVENTIONS
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", default="outputs/roi/risk_series")
+    parser.add_argument(
+        "--series-dir",
+        default=None,
+        help="Optional directory to scan for intervention_*.npz; if provided and any are found, keys are derived from filenames.",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    keys = sorted(INTERVENTIONS.keys())
+    keys: list[str] = []
+    if args.series_dir:
+        series_dir = Path(args.series_dir)
+        if series_dir.exists():
+            discovered = []
+            for p in sorted(series_dir.glob("intervention_*.npz")):
+                name = p.name
+                if not name.startswith("intervention_") or not name.endswith(".npz"):
+                    continue
+                discovered.append(name[len("intervention_") : -len(".npz")])
+            keys = discovered
+    if not keys:
+        keys = sorted(INTERVENTIONS.keys())
     (out_dir / "intervention_keys.txt").write_text("\n".join(keys) + "\n", encoding="utf-8")
 
     names = {k: str(INTERVENTIONS[k].get("name", k)) for k in keys}

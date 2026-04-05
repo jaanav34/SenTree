@@ -1,14 +1,24 @@
 # SenTree
 
-SenTree is a climate adaptation intelligence platform for investor-style decision making.  
-It combines:
-- Graph neural network (GNN) climate risk propagation
-- Tail-risk escalation detection
-- Koppen-Geiger climate suitability filtering
-- Intervention simulation and resilience ROI
-- Native semantic search over simulation videos (Gemini Embedding 2, no RAG text middle layer)
+SenTree is a climate adaptation intelligence platform built for investor-style decision making.
+It helps answer a concrete deployment question:
 
-The current build is optimized for a hackathon demo: clear decisions, explainable math, and fast visual evidence.
+> If we allocate adaptation capital today, where should it go to avoid the most future loss — and how confident are we?
+
+SenTree is not “just a model”. It’s an end-to-end decision workflow that turns climate time series into:
+
+- **Tail-risk escalation detection** (where regimes are shifting, not just trending)
+- **Systemic risk propagation** with a **Graph Neural Network (GNN)** (risk cascades across neighboring nodes)
+- **Intervention simulation** with **Köppen–Geiger** climate-fit constraints (avoid biome-mismatch recommendations)
+- **Resilience ROI + uncertainty bounds** (so “high ROI” isn’t confused with “high confidence”)
+- **Evidence artifacts**: videos, maps, and searchable outputs for human review
+
+The current build is optimized for a hackathon-style demo: clear decisions, explainable math, and fast visual evidence.
+
+## Reproducibility / Runbook (Start Here If You’re New)
+
+For a fully copy‑pasteable “from zero to working demo” guide (local + HPC/Slurm + port forwarding + video rendering),
+read `instructions.md`.
 
 ## Product Goal
 
@@ -35,12 +45,24 @@ Recent work focused on product clarity and investor usability:
 
 ## Core Method
 
-1. Load climate data (ISIMIP when available, synthetic fallback otherwise)
-2. Compute tail-risk escalation features (momentum + volatility + self-excitation)
-3. Build graph and train GNN for systemic risk propagation
-4. Apply interventions with Koppen-Geiger compatibility constraints
-5. Compute avoided-loss and resilience ROI with uncertainty terms
-6. Render videos/maps and optionally index videos for semantic search
+At a high level, the pipeline (`scripts/run_pipeline.py`) is:
+
+1. **Load climate data**
+   - Real ISIMIP NetCDFs when present (daily → monthly/annual resampling)
+   - Synthetic fallback for portable demos
+2. **Detect tail-risk escalation**
+   - EWMA smoothing + standardized momentum + rolling volatility
+   - Self-exciting “clustered extremes” component (Hawkes intensity)
+3. **Build a climate graph**
+   - Each node is a grid cell; edges connect geographic neighbors
+4. **Train a GNN to propagate systemic risk**
+   - Predict node-level risk fields and how they evolve under interventions
+5. **Simulate interventions**
+   - Parameter deltas + Köppen–Geiger climate-fit allow/block rules
+6. **Compute ROI + uncertainty**
+   - Avoided loss proxy, ROI point estimate, confidence intervals
+7. **Render evidence**
+   - Core videos, per-intervention comparison videos, mega “grid” videos, and a static ROI target map PNG
 
 ## Architecture Map
 
@@ -78,11 +100,49 @@ src/
 apps/gnn-playback/               React playback frontend
 ```
 
+## Research Foundations (What We Implemented)
+
+SenTree’s math and visual evidence are grounded in four research building blocks. The Streamlit app contains a
+plain-language walkthrough of these papers and their equations (see `src/dashboard/app.py`).
+
+1) **Gurjar & Camp (2026) — EWMA tail-risk detection**
+- SenTree uses EWMA smoothing to suppress short-lived noise, then measures standardized momentum and rolling volatility.
+- Output: a per-node regime classification (**Baseline / Buildup / Surge**) and a core signal for tail-risk scoring.
+- Implementation: `src/tail_risk/volatility.py`, `src/tail_risk/momentum.py`.
+
+2) **Hawkes (1971) / Ogata (1988) — Self-exciting point processes**
+- Extremes cluster (aftershocks, crisis cascades). SenTree models clustered climate extremes as a Hawkes-style intensity.
+- Output: a normalized self-excitation signal that contributes to the composite tail-risk score.
+- Implementation: `src/tail_risk/engine.py` (Hawkes intensity), combined into the composite score.
+
+3) **Hess et al. (2023) — CycleGAN-inspired downscaling (adapted)**
+- Climate + risk fields are often coarse. SenTree adapts Hess et al.’s key ideas into a lightweight deterministic
+  downscaler: bicubic upsampling + gradient-aware texture + smoothing + physical constraints.
+- Output: high-resolution frames for videos/maps without long GPU training runs.
+- Implementation: `src/rendering/downscale.py` and video renderers in `src/rendering/render_video.py`.
+
+4) **Ito et al. (2020) — FRA uncertainty + skill diagnostics**
+- Climate impact models can be over-confident. SenTree uses FRA-inspired uncertainty inflation and decomposes uncertainty
+  into precipitation/model/scenario components, producing honest ROI bounds.
+- Output: ROI confidence intervals and an investor-facing confidence signal.
+- Implementation: `src/simulation/roi.py`.
+
+## Why This Is Impactful (What It Solves)
+
+Most climate dashboards stop at “here’s a hazard map.” SenTree is built to support an actual allocation decision:
+
+- **Early warning**: find locations entering unstable regimes (not just warm places).
+- **Systemic view**: model risk propagation across space (cascades), not only per-cell scores.
+- **Actionability**: simulate interventions and show their *counterfactual* effect (baseline vs intervention).
+- **Honest uncertainty**: provide confidence bounds so high ROI doesn’t hide fragile assumptions.
+- **Auditability**: generate videos/maps that allow humans to verify and communicate the story of each recommendation.
+
 ## Requirements
 
 - Python 3.11+
 - ffmpeg on PATH for MP4 generation
 - Gemini API key only for semantic indexing/search (`GOOGLE_API_KEY` or `GEMINI_API_KEY`)
+- Node.js + npm only if you want the optional React GNN playback app (`apps/gnn-playback/`)
 
 Install dependencies via setup scripts:
 
@@ -193,6 +253,9 @@ Useful env flags:
 - `SENTREE_RENDER_COMPARISON_VIDEOS=0` disable per-intervention videos
 - `SENTREE_RENDER_CORE_VIDEOS=0` disable baseline/tail/KG core videos
 - `SENTREE_RENDER_MAP_PNG=0` disable `tail_risk_map.png`
+- `SENTREE_SAVE_RISK_SERIES_NPZ=1` save NPZ series for parallel video rendering later
+- `SENTREE_KG_WORKERS=<n>` opt-in CPU parallelism for Köppen–Geiger (Linux/HPC)
+- `SENTREE_FFMPEG_THREADS=<n>` ffmpeg encoding threads (cluster friendly)
 
 ## Current Scope And Caveats
 

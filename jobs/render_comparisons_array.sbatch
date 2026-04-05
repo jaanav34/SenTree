@@ -17,7 +17,7 @@
 # Or manually:
 #   export SENTREE_KEYS_FILE=scripts/.cache/intervention_keys.txt
 #   N=$(wc -l < "$SENTREE_KEYS_FILE")
-#   sbatch --export=ALL --array=1-$N jobs/render_comparisons_array.sbatch
+#   sbatch -A <account> --export=ALL --array=1-$N jobs/render_comparisons_array.sbatch
 #
 
 #SBATCH -J sentree_render_cmp

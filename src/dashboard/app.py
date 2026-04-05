@@ -1347,14 +1347,25 @@ if active_view == "Dashboard":
         st.info("Risk time series not found yet. Re-run the pipeline to generate `outputs/roi/risk_timeseries.json`.")
     else:
         intervention_keys = [k for k in ts.keys() if k not in {"years", "baseline"}]
-        intervention_options = [("Baseline", None)]
+        category_map = {"All": []}
         for key in intervention_keys:
-            label = INTERVENTIONS.get(key, {}).get("name", key.replace("_", " ").title())
-            intervention_options.append((label, key))
+            category = INTERVENTIONS.get(key, {}).get("category", "other").replace("_", " ").title()
+            category_map.setdefault(category, []).append(key)
 
-        labels = [opt[0] for opt in intervention_options]
-        choice = st.radio("Intervention", labels, horizontal=True)
-        chosen_key = dict(intervention_options).get(choice)
+        category_map["All"] = sorted(intervention_keys)
+        category_options = ["All"] + sorted([c for c in category_map.keys() if c != "All"])
+        category_choice = st.selectbox("Category", category_options, index=0)
+
+        scoped_keys = category_map.get(category_choice, [])
+        scoped_labels = ["Baseline"]
+        scoped_lookup = {"Baseline": None}
+        for key in scoped_keys:
+            label = INTERVENTIONS.get(key, {}).get("name", key.replace("_", " ").title())
+            scoped_labels.append(label)
+            scoped_lookup[label] = key
+
+        choice = st.selectbox("Intervention", scoped_labels, index=0)
+        chosen_key = scoped_lookup.get(choice)
 
         fig = build_risk_timeseries_figure(ts, "p95", chosen_key, choice if chosen_key else None)
         st.pyplot(fig, use_container_width=True)

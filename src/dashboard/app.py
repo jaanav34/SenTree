@@ -1105,18 +1105,14 @@ roi_table = pd.DataFrame(roi_rows)
 if not roi_table.empty:
     roi_table = roi_table.sort_values("ROI (x)", ascending=False, ignore_index=True)
 
-view_cols = st.columns([1, 1, 2])
+view_cols = st.columns([1, 2])
 with view_cols[0]:
     compare_view = st.radio("View", ["Chart", "Table"], horizontal=True, label_visibility="visible")
-with view_cols[1]:
-    show_top10 = st.checkbox("Top 10 only", value=True)
-
-filtered_table = roi_table
-if show_top10 and not roi_table.empty:
-    filtered_table = roi_table.head(10)
 
 if compare_view == "Chart":
-    if not filtered_table.empty:
+    if not roi_table.empty:
+        show_top10 = st.checkbox("Top 10 only", value=True, help="Keep the chart short and video-ready.")
+        filtered_table = roi_table.head(10) if show_top10 else roi_table
         chart_metric = st.selectbox(
             "Chart Metric",
             ["ROI (x)", "Loss Avoided ($B)", "Mean Risk Reduction (%)"],
@@ -1143,6 +1139,8 @@ if compare_view == "Chart":
     else:
         st.info("ROI data not available yet. Run `python scripts/run_pipeline.py` first.")
 else:
+    show_top10 = st.checkbox("Top 10 only", value=True, help="Keep the table compact and video-ready.")
+    filtered_table = roi_table.head(10) if show_top10 else roi_table
     table_height = 42 * max(len(filtered_table), 1)
     st.dataframe(
         filtered_table,

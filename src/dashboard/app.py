@@ -44,14 +44,19 @@ st.markdown(
         --sentree-sidebar-border: rgba(244, 238, 223, 0.18);
     }
 
-    header[data-testid="stHeader"] {
+    /* Hide the toolbar (Deploy / hamburger menu) but keep the header
+       itself visible so the sidebar collapse/expand button remains
+       accessible.  Without this, closing the sidebar is permanent
+       because Streamlit persists the collapsed state in localStorage. */
+    div[data-testid="stToolbar"] {
         visibility: hidden;
         height: 0;
     }
 
-    div[data-testid="stToolbar"] {
-        visibility: hidden;
-        height: 0;
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
 
     .stApp {

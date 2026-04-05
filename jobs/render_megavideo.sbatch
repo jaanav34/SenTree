@@ -7,7 +7,9 @@
 #   outputs/roi/risk_series/intervention_<key>.npz  (for each key)
 #
 # Submit:
-#   sbatch jobs/render_megavideo.sbatch
+#   sbatch -A <account> jobs/render_megavideo.sbatch
+# or:
+#   export SENTREE_SLURM_ACCOUNT=<account>; bash scripts/submit_render_megavideo.sh
 #
 # Tail logs:
 #   tail -f logs/megavideo.<jobid>.out

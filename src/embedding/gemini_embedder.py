@@ -118,7 +118,7 @@ def _make_video_part(video_path: str, types):
 
 
 class GeminiEmbedder:
-    """Gemini Embeddings 2 backend (API-based)."""
+    """Gemini Embeddings 2 backend (API-based, native video/text space)."""
 
     def __init__(
         self,
@@ -151,9 +151,6 @@ class GeminiEmbedder:
         from google.genai import types
 
         video_part = _make_video_part(video_path, types)
-        parts = [video_part]
-        if metadata:
-            parts.append(types.Part.from_text(text=str(metadata)))
 
         if verbose:
             size_kb = os.path.getsize(video_path) / 1024
@@ -164,7 +161,7 @@ class GeminiEmbedder:
         response = _retry(
             lambda: self._client.models.embed_content(
                 model=self._model,
-                contents=types.Content(parts=parts),
+                contents=types.Content(parts=[video_part]),
                 config=types.EmbedContentConfig(
                     task_type="RETRIEVAL_DOCUMENT",
                     output_dimensionality=self._dimensions,

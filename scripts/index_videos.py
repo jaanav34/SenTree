@@ -105,7 +105,7 @@ for vid_file in videos:
 
     print(f"  Embedding: {vid_file}...")
     try:
-        embedding = embed_video(vid_path, metadata=meta.get('description'), use_gemini=True)
+        embedding = embed_video(vid_path, use_gemini=True)
         db.add_video(vid_id, embedding, metadata=meta)
         print("    Done")
     except Exception as e:

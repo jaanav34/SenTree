@@ -19,6 +19,8 @@ def embed_video(video_path, metadata=None, n_frames=8, use_gemini=True):
 
     Notes:
     - `n_frames` is ignored by the Gemini Embeddings 2 backend.
+    - Video indexing remains native-video only; `metadata` is kept only for
+      API compatibility and is not mixed into Gemini document embeddings.
     - `use_gemini=False` uses the local fallback embedder.
     """
     backend = "gemini" if use_gemini else "local"

@@ -946,134 +946,100 @@ def render_math_view() -> None:
         "Inspect the mathematical assumptions behind tail-risk escalation, ROI estimation, and the graph model itself.",
     )
 
-    math_tab, playground_tab = st.tabs(["Mathematical Foundations", "Interactive Playground"])
+    st.subheader("1. Tail-Risk Escalation")
+    st.markdown(
+        dedent(
+            """
+            The tail-risk engine identifies nodes where climate volatility and momentum intersect to create regime shifts.
 
-    with math_tab:
-        st.subheader("1. Tail-Risk Escalation")
-        st.markdown(
-            dedent(
-                """
-                The tail-risk engine identifies nodes where climate volatility and momentum intersect to create regime shifts.
-
-                **A. EWMA smoothing**
-                Raw climate signals are smoothed to suppress short-lived noise before momentum is measured.
-                """
-            )
+            **A. EWMA smoothing**
+            Raw climate signals are smoothed to suppress short-lived noise before momentum is measured.
+            """
         )
-        st.latex(r"\lambda(t) = \alpha X(t) + (1-\alpha)\lambda(t-1)")
-        st.markdown("where $\\alpha = 0.3$ is the decay factor.")
+    )
+    st.latex(r"\lambda(t) = \alpha X(t) + (1-\alpha)\lambda(t-1)")
+    st.markdown("where $\\alpha = 0.3$ is the decay factor.")
 
-        st.markdown(
-            dedent(
-                """
-                **B. Standardized momentum**
-                Momentum captures how quickly the smoothed signal is accelerating relative to local volatility.
-                """
-            )
+    st.markdown(
+        dedent(
+            """
+            **B. Standardized momentum**
+            Momentum captures how quickly the smoothed signal is accelerating relative to local volatility.
+            """
         )
-        st.latex(r"m(t) = \frac{\lambda(t)-\lambda(t-1)}{\sigma_w(t)+\epsilon}")
+    )
+    st.latex(r"m(t) = \frac{\lambda(t)-\lambda(t-1)}{\sigma_w(t)+\epsilon}")
 
-        st.markdown(
-            dedent(
-                """
-                **C. Rolling volatility**
-                Volatility measures the stability of the momentum process over a local window.
-                """
-            )
+    st.markdown(
+        dedent(
+            """
+            **C. Rolling volatility**
+            Volatility measures the stability of the momentum process over a local window.
+            """
         )
-        st.latex(r"v(t) = \sqrt{\frac{1}{w}\sum_{i=t-w+1}^{t}[m(i)-\bar{m}_w]^2}")
+    )
+    st.latex(r"v(t) = \sqrt{\frac{1}{w}\sum_{i=t-w+1}^{t}[m(i)-\bar{m}_w]^2}")
 
-        st.markdown(
-            dedent(
-                """
-                **D. Hawkes self-excitation**
-                A Hawkes-style intensity term helps the system capture clustered extreme events rather than isolated spikes.
-                """
-            )
+    st.markdown(
+        dedent(
+            """
+            **D. Hawkes self-excitation**
+            A Hawkes-style intensity term helps the system capture clustered extreme events rather than isolated spikes.
+            """
         )
-        st.latex(r"\lambda^*(t) = \mu + \sum_{t_i < t}\beta e^{-\gamma(t-t_i)}")
-        st.markdown("Nodes above the 95th percentile of the composite score are flagged as tail-risk escalation zones.")
+    )
+    st.latex(r"\lambda^*(t) = \mu + \sum_{t_i < t}\beta e^{-\gamma(t-t_i)}")
+    st.markdown("Nodes above the 95th percentile of the composite score are flagged as tail-risk escalation zones.")
 
-        st.subheader("2. Resilience ROI And Economic Exposure")
-        st.markdown(
-            dedent(
-                """
-                The opportunity map represents avoided damage potential under each intervention.
+    st.subheader("2. Resilience ROI And Economic Exposure")
+    st.markdown(
+        dedent(
+            """
+            The opportunity map represents avoided damage potential under each intervention.
 
-                **A. Loss proxy**
-                Loss is modeled as climate risk interacting with GDP, population, and a regional scaling factor.
-                """
-            )
+            **A. Loss proxy**
+            Loss is modeled as climate risk interacting with GDP, population, and a regional scaling factor.
+            """
         )
-        st.latex(r"L_{node} = R_{score}\times(G_{norm}\times P_{norm})\times S")
+    )
+    st.latex(r"L_{node} = R_{score}\times(G_{norm}\times P_{norm})\times S")
 
-        st.markdown(
-            dedent(
-                """
-                **B. Resilience ROI**
-                Returns are based on discounted avoided losses over a ten-year horizon.
-                """
-            )
+    st.markdown(
+        dedent(
+            """
+            **B. Resilience ROI**
+            Returns are based on discounted avoided losses over a ten-year horizon.
+            """
         )
-        st.latex(r"ROI_{resilience} = \frac{\sum_{t=1}^{10}(L_{baseline}-L_{intervention})\times(1+r)^{-t}}{Cost}")
+    )
+    st.latex(r"ROI_{resilience} = \frac{\sum_{t=1}^{10}(L_{baseline}-L_{intervention})\times(1+r)^{-t}}{Cost}")
 
-        st.markdown(
-            dedent(
-                """
-                **C. Multi-source uncertainty**
-                Uncertainty is combined in quadrature to keep precipitation, model, and scenario error visible.
-                """
-            )
+    st.markdown(
+        dedent(
+            """
+            **C. Multi-source uncertainty**
+            Uncertainty is combined in quadrature to keep precipitation, model, and scenario error visible.
+            """
         )
-        st.latex(r"U_{total} = \sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}")
+    )
+    st.latex(r"U_{total} = \sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}")
 
-        st.subheader("3. GNN Risk Architecture")
-        st.markdown("The GNN propagates node-level risk through geographic and economic links using graph attention.")
-        st.latex(r"h_i^{(l+1)} = \sigma\left(\sum_{j \in \mathcal{N}(i)} \alpha_{ij}\mathbf{W}h_j^{(l)}\right)")
+    st.subheader("3. GNN Risk Architecture")
+    st.markdown("The GNN propagates node-level risk through geographic and economic links using graph attention.")
+    st.latex(r"h_i^{(l+1)} = \sigma\left(\sum_{j \in \mathcal{N}(i)} \alpha_{ij}\mathbf{W}h_j^{(l)}\right)")
 
-        st.subheader("4. Climate Regime Classification")
-        st.markdown(
-            dedent(r"""
-                KÃ¶ppen-Geiger classes are used as climate-relative context so stabilization is measured against each node's regime.
+    st.subheader("4. Climate Regime Classification")
+    st.markdown(
+        dedent(r"""
+            KÃ¶ppen-Geiger classes are used as climate-relative context so stabilization is measured against each node's regime.
 
-                - Group A: tropical, where $T_{min} \ge 18^\circ C$
-                - Group B: dry, where annual precipitation is below the dryness threshold
-                - Group C: temperate, where $0^\circ C < T_{min} < 18^\circ C$
-                - Group D: continental, where $T_{min} \le 0^\circ C$
-                - Group E: polar, where $T_{max} < 10^\circ C$
-                """)
-        )
-
-    with playground_tab:
-        st.subheader("Risk Simulation Playground")
-        st.markdown("Adjust parameters to see how they change the ROI calculation logic.")
-
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            p_alpha = st.slider("EWMA Decay ($\\alpha$)", 0.05, 0.95, 0.30, key="math_alpha")
-            p_discount = st.slider("Discount Rate ($r$)", 0.01, 0.15, 0.05, key="math_discount")
-        with col_p2:
-            p_exposure = st.slider("Economic Exposure Scaling", 0.5, 5.0, 1.0, key="math_exposure")
-            p_threshold = st.slider("Tail-Risk Percentile", 80, 99, 95, key="math_threshold")
-
-        reduction = 15.0 * p_exposure
-        discounted_val = sum(reduction / (1 + p_discount) ** t for t in range(10))
-
-        st.info(
-            f"Theoretical outcome: a risk reduction of {reduction:.1f}% implies approximately ${discounted_val:.2f}B in discounted avoided loss over 10 years."
-        )
-
-        st.markdown(
-            dedent(
-                f"""
-                **Interpretation**
-
-                - Higher $\\alpha$ makes the detector more reactive to recent shocks.
-                - Lower discount rates place more value on long-lived resilience assets.
-                - A {p_threshold}th percentile threshold narrows focus to more extreme events.
-                """
-            )
-        )
+            - Group A: tropical, where $T_{min} \ge 18^\circ C$
+            - Group B: dry, where annual precipitation is below the dryness threshold
+            - Group C: temperate, where $0^\circ C < T_{min} < 18^\circ C$
+            - Group D: continental, where $T_{min} \le 0^\circ C$
+            - Group E: polar, where $T_{max} < 10^\circ C$
+            """)
+    )
 
 
 top_intervention = max(roi_data_adjusted.values(), key=lambda item: item.get("roi", 0.0))
@@ -1698,5 +1664,4 @@ if active_view == "Math":
 # --- Footer ---
 st.divider()
 st.caption('SenTree - Resilience ROI Dashboard | ML@Purdue Catapult Hackathon')
-
 

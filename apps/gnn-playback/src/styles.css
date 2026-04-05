@@ -35,6 +35,24 @@ select {
   padding: 24px;
 }
 
+.loading-panel {
+  padding: 28px 30px;
+  border-radius: 28px;
+  background: rgba(255, 252, 246, 0.92);
+  border: 1px solid rgba(23, 52, 47, 0.10);
+  box-shadow: 0 14px 38px rgba(23, 52, 47, 0.08);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.loading-note {
+  margin-top: 12px;
+  color: #5a6f69;
+  font-size: 14px;
+  font-weight: 600;
+  max-width: 720px;
+}
+
 .hero {
   padding: 28px 30px;
   border-radius: 32px;

@@ -30,6 +30,12 @@ Or from the repo root:
 ./scripts/run_gnn_playback.sh
 ```
 
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run_gnn_playback.ps1
+```
+
 Default dev URL:
 
 ```text

@@ -557,8 +557,13 @@ def _apply_capital_allocation(roi_data, capital_allocation):
 
         base_cost = float(base_cost)
         ratio = float(capital_allocation) / base_cost
-        # Diminishing returns: impact scales sublinearly with capital.
-        impact_scale = ratio ** 0.85
+        # Keep small-budget ROI from inflating unrealistically:
+        # - For ratio <= 1, use linear scaling (ROI stays near baseline).
+        # - For ratio > 1, apply sublinear scaling (diminishing returns).
+        if ratio <= 1.0:
+            impact_scale = ratio
+        else:
+            impact_scale = ratio ** 0.85
 
         base_roi = float(entry.get("roi", 0.0))
         base_loss = float(entry.get("total_loss_avoided", 0.0))

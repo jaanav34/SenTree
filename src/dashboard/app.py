@@ -1098,16 +1098,37 @@ st.caption(
     "(sublinear, diminishing-returns assumption)."
 )
 
-active_view = st.radio(
-    "View",
-    ["Dashboard", "Recommendation", "GNN Playback", "Math"],
-    horizontal=True,
-    label_visibility="collapsed",
-    key="sentree_view",
+overview_tab, recommendation_tab, evidence_tab, model_tab = st.tabs(
+    ["Overview", "Recommendation", "Evidence", "Model"]
 )
-st.caption("Navigation: Dashboard = search + media, Recommendation = investment ranking + comparison analytics, GNN Playback = training dynamics, Math = model equations.")
+st.caption(
+    "Navigation: Overview = mission snapshot, Recommendation = investment ranking + comparison analytics, "
+    "Evidence = search/videos/risk/map, Model = GNN playback + math."
+)
 
-if active_view == "Recommendation":
+with recommendation_tab:
+    recommendation_brief_tab, recommendation_compare_tab = st.tabs(["Brief", "Comparison"])
+
+with evidence_tab:
+    evidence_search_tab, evidence_videos_tab, evidence_risk_tab, evidence_map_tab = st.tabs(
+        ["Search", "Videos", "Risk Over Time", "Map"]
+    )
+
+with model_tab:
+    model_gnn_tab, model_math_tab = st.tabs(["GNN Playback", "Math Foundations"])
+
+with overview_tab:
+    section_header(
+        "Overview",
+        "Mission snapshot",
+        "Use Recommendation for investment decisions, Evidence for media and diagnostics, and Model for training behavior and equations.",
+    )
+    surface_card(
+        "What SenTree does",
+        "It predicts tail-risk cascades with a GNN, simulates Koppen-aware interventions, and ranks them by resilience ROI, confidence, and avoided loss.",
+    )
+
+with recommendation_brief_tab:
     section_header(
         "Decide",
         "Investment committee brief",
@@ -1196,7 +1217,7 @@ if active_view == "Recommendation":
                     f"(ROI {row['ROI (x)']:.2f}x, confidence {row['Confidence (%)']:.0f}%)."
                 )
 
-if active_view == "Dashboard":
+with evidence_search_tab:
     section_header(
         "Discover",
         "Search the simulation library",
@@ -1217,7 +1238,7 @@ if active_view == "Dashboard":
     if "search_query_text" not in st.session_state:
         st.session_state.search_query_text = ""
 
-if active_view == "Dashboard":
+with evidence_search_tab:
     # --- Search Results ---
     if search_btn and query:
         try:
@@ -1271,7 +1292,7 @@ if active_view == "Dashboard":
 
                         if metadata.get('has_tail_risk'):
                             st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
-if active_view == "Recommendation":
+with recommendation_compare_tab:
     # --- Metrics Dashboard ---
     section_header(
         "Compare",
@@ -1347,7 +1368,7 @@ if active_view == "Recommendation":
             },
         )
 
-if active_view == "GNN Playback":
+with model_gnn_tab:
     section_header(
         "Playback",
         "GNN training playback",
@@ -1446,57 +1467,47 @@ if active_view == "GNN Playback":
                     st.session_state.training_epoch_idx += 1
                     st.rerun()
 
-if active_view == "Dashboard":
+with evidence_tab:
     ts = load_risk_timeseries()
     opportunity = load_opportunity_map()
 
-    # --- Video Display ---
+with evidence_videos_tab:
     section_header(
         "Watch",
         "Simulation videos",
         "Review the rendered outputs that feed the search index and communicate the intervention story visually.",
     )
-
     video_dir = Path("outputs/videos")
     if video_dir.exists():
         videos = sorted(video_dir.glob("*.mp4"), key=lambda p: p.name.lower())
         if videos:
             comparison_videos = [p for p in videos if p.name.startswith("comparison_")]
             grid_videos = [
-                p
-                for p in videos
-                if p.stem.startswith("interventions_")
-                or p.stem.startswith("megavideo_")
-                or "grid" in p.stem
-                or "megavideo" in p.stem
+                p for p in videos
+                if p.stem.startswith("interventions_") or p.stem.startswith("megavideo_") or "grid" in p.stem or "megavideo" in p.stem
             ]
-            core_videos = [
-                p
-                for p in videos
-                if p.stem in {"baseline_risk", "tail_risk_escalation", "climate_classification_shift"}
-            ]
+            core_videos = [p for p in videos if p.stem in {"baseline_risk", "tail_risk_escalation", "climate_classification_shift"}]
 
             video_type = st.selectbox(
                 "Video type",
                 ["Comparison", "Core Maps", "Grid"],
                 index=0,
+                key="evidence_video_type",
                 help="Use this dropdown instead of tabs to avoid horizontal scrolling when many videos exist.",
             )
-
             if video_type == "Comparison":
                 if not comparison_videos:
                     st.info("No comparison videos found yet. Render them via `bash scripts/submit_render_comparisons.sh`.")
                 else:
                     def _cmp_label(p: Path) -> str:
-                        key = p.stem[len("comparison_") :] if p.stem.startswith("comparison_") else p.stem
+                        key = p.stem[len("comparison_"):] if p.stem.startswith("comparison_") else p.stem
                         name = INTERVENTIONS.get(key, {}).get("name") or key.replace("_", " ").title()
                         return f"{name}"
 
-                    options = { _cmp_label(p): p for p in sorted(comparison_videos, key=_cmp_label) }
-                    label = st.selectbox("Select intervention", list(options.keys()), index=0)
+                    options = {_cmp_label(p): p for p in sorted(comparison_videos, key=_cmp_label)}
+                    label = st.selectbox("Select intervention", list(options.keys()), index=0, key="evidence_video_cmp")
                     st.caption(str(options[label]))
                     _show_video(str(options[label]))
-
             elif video_type == "Core Maps":
                 if not core_videos:
                     st.info("No core map videos found yet. Run `python scripts/run_pipeline.py`.")
@@ -1512,11 +1523,10 @@ if active_view == "Dashboard":
                         if label in options:
                             label = f"{label} ({p.name})"
                         options[label] = p
-                    label = st.selectbox("Select map", list(options.keys()), index=0)
+                    label = st.selectbox("Select map", list(options.keys()), index=0, key="evidence_video_core")
                     st.caption(str(options[label]))
                     _show_video(str(options[label]))
-
-            else:  # Grid
+            else:
                 if not grid_videos:
                     st.info(
                         "No grid/mega videos found yet.\n\n"
@@ -1525,15 +1535,15 @@ if active_view == "Dashboard":
                     )
                 else:
                     options = {p.stem.replace("_", " ").title(): p for p in grid_videos}
-                    label = st.selectbox("Select grid video", list(options.keys()), index=0)
+                    label = st.selectbox("Select grid video", list(options.keys()), index=0, key="evidence_video_grid")
                     st.caption(str(options[label]))
                     _show_video(str(options[label]))
         else:
             st.info("No videos generated yet. Run `python scripts/run_pipeline.py`.")
     else:
-        st.info('Output directory not found. Run the pipeline first.')
+        st.info("Output directory not found. Run the pipeline first.")
 
-    # --- Quantitative Risk Chart ---
+with evidence_risk_tab:
     section_header(
         "Monitor",
         "Risk over time",
@@ -1550,7 +1560,7 @@ if active_view == "Dashboard":
 
         category_map["All"] = sorted(intervention_keys)
         category_options = ["All"] + sorted([c for c in category_map.keys() if c != "All"])
-        category_choice = st.selectbox("Category", category_options, index=0)
+        category_choice = st.selectbox("Category", category_options, index=0, key="evidence_risk_category")
 
         scoped_keys = category_map.get(category_choice, [])
         scoped_labels = ["Baseline"]
@@ -1560,35 +1570,30 @@ if active_view == "Dashboard":
             scoped_labels.append(label)
             scoped_lookup[label] = key
 
-        choice = st.selectbox("Intervention", scoped_labels, index=0)
+        choice = st.selectbox("Intervention", scoped_labels, index=0, key="evidence_risk_intervention")
         chosen_key = scoped_lookup.get(choice)
-
         fig = build_risk_timeseries_figure(ts, "p95", chosen_key, choice if chosen_key else None)
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
 
-    # --- Tail Risk Map ---
+with evidence_map_tab:
     section_header(
         "Locate",
         "Tail-risk escalation map",
-        "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the modelâ€™s extreme-regime threshold.",
+        "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model's extreme-regime threshold.",
     )
     if opportunity is not None:
         with st.expander("Interactive map (optional)", expanded=False):
             st.caption("Optional 2D/3D basemap view. The default below is the static ROI PNG.")
             map_mode = st.selectbox(
                 "Interactive map mode",
-                [
-                    "2D ROI map (basemap)",
-                    "3D ROI extrusion (slower)",
-                ],
+                ["2D ROI map (basemap)", "3D ROI extrusion (slower)"],
                 index=0,
                 key="sentree_map_mode",
             )
             st.markdown("Hover any cell to see a real-world label (nearest city + distance).")
             try:
                 import pydeck as pdk
-
                 df_pts, (vmin, vmax) = _opportunity_points(opportunity)
 
                 with st.expander("Map debug (lat/lon ranges)"):
@@ -1610,7 +1615,6 @@ if active_view == "Dashboard":
                 max_points = 50_000
                 if len(df_pts) > max_points:
                     df_pts = df_pts.sample(max_points, random_state=0)
-
                 lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
                 lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
                 zoom = _suggest_pydeck_zoom(lat_span, lon_span)
@@ -1622,7 +1626,6 @@ if active_view == "Dashboard":
                     zoom=zoom,
                     pitch=pitch,
                 )
-
                 cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
                 extruded = map_mode == "3D ROI extrusion (slower)"
                 elevation_scale = 4000.0 if extruded else 1.0
@@ -1638,32 +1641,25 @@ if active_view == "Dashboard":
                     get_fill_color="color",
                     opacity=0.68 if not extruded else 0.85,
                 )
-
-                tooltip = {
-                    "text": (
-                        "Avoided damage potential: {value}\n"
-                        "Nearest: {nearest_city} (~{nearest_km} km)"
-                    )
-                }
-
+                tooltip = {"text": "Avoided damage potential: {value}\nNearest: {nearest_city} (~{nearest_km} km)"}
                 deck = pdk.Deck(
                     layers=[layer_cells],
                     initial_view_state=view,
                     tooltip=tooltip,
                     map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
                 )
-                st.pydeck_chart(deck, width='stretch')
+                st.pydeck_chart(deck, width="stretch")
                 st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
             except Exception as e:
                 st.info(f"Interactive map unavailable ({e}).")
 
-    tail_risk_img = 'outputs/tail_risk_map.png'
+    tail_risk_img = "outputs/tail_risk_map.png"
     if os.path.exists(tail_risk_img):
-        st.image(tail_risk_img, width='stretch')
+        st.image(tail_risk_img, width="stretch")
     else:
-        st.info('Tail-risk map not generated yet.')
+        st.info("Tail-risk map not generated yet.")
 
-if active_view == "Math":
+with model_math_tab:
     render_math_view()
 
 # --- Footer ---

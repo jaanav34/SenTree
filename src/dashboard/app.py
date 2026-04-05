@@ -1245,29 +1245,30 @@ if logo_path.exists():
         "</div>"
     )
 
-st.markdown(
-    f"""
-    <div class="sentree-hero">
-        <div class="sentree-hero-grid">
-            <div class="sentree-hero-copy">
-                <div class="sentree-kicker">Climate adaptation intelligence</div>
-                <h1>SenTree</h1>
-                <p>
-                    A decision cockpit for climate-risk propagation, resilience ROI, and intervention storytelling.
-                    Explore where the graph neural network sees cascading risk, how mitigation strategies alter the map,
-                    and which assets deserve immediate attention.
-                </p>
-                <div class="sentree-badges">
-                    <div class="sentree-badge">Scenario: {scenario}</div>
-                    <div class="sentree-badge">Focus: {intervention}</div>
+if active_section == "Overview":
+    st.markdown(
+        f"""
+        <div class="sentree-hero">
+            <div class="sentree-hero-grid">
+                <div class="sentree-hero-copy">
+                    <div class="sentree-kicker">Climate adaptation intelligence</div>
+                    <h1>SenTree</h1>
+                    <p>
+                        A decision cockpit for climate-risk propagation, resilience ROI, and intervention storytelling.
+                        Explore where the graph neural network sees cascading risk, how mitigation strategies alter the map,
+                        and which assets deserve immediate attention.
+                    </p>
+                    <div class="sentree-badges">
+                        <div class="sentree-badge">Scenario: {scenario}</div>
+                        <div class="sentree-badge">Focus: {intervention}</div>
+                    </div>
                 </div>
+                {logo_markup}
             </div>
-            {logo_markup}
         </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Recompute investment-sensitive values
@@ -1282,38 +1283,43 @@ summary_roi   = float(top_intervention.get("roi", 0.0))
 summary_loss  = _format_money_short(top_intervention.get("total_loss_avoided", 0.0))
 investor_rank = _build_investor_rank_table(roi_data_adjusted)
 
-# ---------------------------------------------------------------------------
-# Persistent top bar: KPIs + AI summary (always visible)
-# ---------------------------------------------------------------------------
-kpi_cols = st.columns(4)
-with kpi_cols[0]:
-    kpi_card("Best ROI", f"{top_intervention.get('roi', 0):.2f}x", top_intervention["name"])
-with kpi_cols[1]:
-    kpi_card("Loss Avoided", _format_money_short(top_intervention.get('total_loss_avoided', 0)), "Top intervention impact")
-with kpi_cols[2]:
-    kpi_card("Capital", _format_money_short(capital_allocation), "Allocated (investor mode)")
-with kpi_cols[3]:
-    kpi_card("Sim Videos", str(video_count), "Clips in search index")
+if active_section == "Overview":
+    # ---------------------------------------------------------------------------
+    # Overview hero KPIs + AI summary (avoid showing on every tab)
+    # ---------------------------------------------------------------------------
+    kpi_cols = st.columns(4)
+    with kpi_cols[0]:
+        kpi_card("Best ROI", f"{top_intervention.get('roi', 0):.2f}x", top_intervention["name"])
+    with kpi_cols[1]:
+        kpi_card(
+            "Loss Avoided",
+            _format_money_short(top_intervention.get("total_loss_avoided", 0)),
+            "Top intervention impact",
+        )
+    with kpi_cols[2]:
+        kpi_card("Capital", _format_money_short(capital_allocation), "Allocated (investor mode)")
+    with kpi_cols[3]:
+        kpi_card("Sim Videos", str(video_count), "Clips in search index")
 
-st.markdown(
-    f"""
-    <div class="sentree-card" style="margin-top:0.9rem;">
-        <div class="sentree-section-label">AI Resilience Summary</div>
-        <p><strong>Our GNN has flagged {summary_tail} tail-risk nodes</strong> in the SE Asia coastal corridor.
-        Allocating {_format_money_short(capital_allocation)} toward <strong>{summary_name}</strong> avoids about
-        {summary_loss} in projected GDP losses by 2045 —
-        a <strong>{summary_roi:.2f}x Resilience ROI</strong> at {summary_conf*100:.0f}% confidence.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    st.markdown(
+        f"""
+        <div class="sentree-card" style="margin-top:0.9rem;">
+            <div class="sentree-section-label">AI Resilience Summary</div>
+            <p><strong>Our GNN has flagged {summary_tail} tail-risk nodes</strong> in the SE Asia coastal corridor.
+            Allocating {_format_money_short(capital_allocation)} toward <strong>{summary_name}</strong> avoids about
+            {summary_loss} in projected GDP losses by 2045 —
+            a <strong>{summary_roi:.2f}x Resilience ROI</strong> at {summary_conf*100:.0f}% confidence.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-st.caption(
-    f"Investor mode: metrics scale with ${capital_allocation/1e6:.0f}M total capital "
-    "(sublinear, diminishing-returns assumption). Adjust via sidebar slider."
-)
+    st.caption(
+        f"Investor mode: metrics scale with ${capital_allocation/1e6:.0f}M total capital "
+        "(sublinear, diminishing-returns assumption). Adjust via sidebar slider."
+    )
 
-st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Breadcrumb strip

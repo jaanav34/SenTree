@@ -62,6 +62,7 @@ def _precompute_series(data):
     from src.data.koppen_geiger import classify_grid
 
     tas, pr = data["tas"], data["pr"]
+    T = tas.shape[0]
 
     temp_vol_series    = compute_volatility_series(tas, window=5, alpha=0.3)   # (T,nlat,nlon)
     temp_mom_series    = compute_momentum_series(tas,   window=3, alpha=0.3)

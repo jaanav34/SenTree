@@ -1260,7 +1260,6 @@ st.markdown(
                 <div class="sentree-badges">
                     <div class="sentree-badge">Scenario: {scenario}</div>
                     <div class="sentree-badge">Focus: {intervention}</div>
-                    <div class="sentree-badge">Region: SE Asia Coastal</div>
                 </div>
             </div>
             {logo_markup}

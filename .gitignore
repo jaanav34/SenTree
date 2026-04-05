@@ -10,3 +10,5 @@ __pycache__/
 .codex/
 .claude/
 .synq/
+apps/gnn-playback/node_modules/
+apps/gnn-playback/dist/

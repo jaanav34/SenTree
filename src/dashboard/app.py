@@ -1335,10 +1335,15 @@ if active_view == "Dashboard":
                 or "grid" in p.stem
                 or "megavideo" in p.stem
             ]
+            core_videos = [
+                p
+                for p in videos
+                if p.stem in {"baseline_risk", "tail_risk_escalation", "climate_classification_shift"}
+            ]
 
             video_type = st.selectbox(
                 "Video type",
-                ["Comparison", "Grid"],
+                ["Comparison", "Core Maps", "Grid"],
                 index=0,
                 help="Use this dropdown instead of tabs to avoid horizontal scrolling when many videos exist.",
             )
@@ -1354,6 +1359,25 @@ if active_view == "Dashboard":
 
                     options = { _cmp_label(p): p for p in sorted(comparison_videos, key=_cmp_label) }
                     label = st.selectbox("Select intervention", list(options.keys()), index=0)
+                    st.caption(str(options[label]))
+                    _show_video(str(options[label]))
+
+            elif video_type == "Core Maps":
+                if not core_videos:
+                    st.info("No core map videos found yet. Run `python scripts/run_pipeline.py`.")
+                else:
+                    friendly = {
+                        "baseline_risk": "Baseline Risk",
+                        "tail_risk_escalation": "Tail-Risk Escalation",
+                        "climate_classification_shift": "Koppen-Geiger Shift",
+                    }
+                    options = {}
+                    for p in core_videos:
+                        label = friendly.get(p.stem, p.stem.replace("_", " ").title())
+                        if label in options:
+                            label = f"{label} ({p.name})"
+                        options[label] = p
+                    label = st.selectbox("Select map", list(options.keys()), index=0)
                     st.caption(str(options[label]))
                     _show_video(str(options[label]))
 

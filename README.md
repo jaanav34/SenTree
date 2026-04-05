@@ -167,10 +167,22 @@ Or use the launcher:
 ./scripts/run_dashboard.sh
 ```
 
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run_dashboard.ps1
+```
+
 ### 6. Launch the React GNN playback app
 
 ```bash
 ./scripts/run_gnn_playback.sh
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run_gnn_playback.ps1
 ```
 
 This script:

@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.collections import LineCollection
 
+from src.simulation.interventions import INTERVENTIONS
+
 st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
 
 st.markdown(
@@ -446,6 +448,15 @@ with st.sidebar:
     st.markdown("Tune the climate lens, intervention package, and search posture before diving into simulations.")
     scenario = st.selectbox('Climate Scenario', ['SSP3-7.0 (High Emissions)', 'SSP1-2.6 (Low Emissions)'])
     intervention = st.selectbox('Intervention', ['Coastal Mangrove Restoration', 'Regenerative Agriculture', 'Both'])
+    capital_allocation = st.slider(
+        "Total Capital Allocation (USD)",
+        min_value=10_000_000,
+        max_value=500_000_000,
+        value=100_000_000,
+        step=10_000_000,
+        format="$%d",
+        help="Investor-mode sensitivity: adjust capital to see ROI and loss avoided update with a diminishing-returns assumption.",
+    )
     st.divider()
     surface_card("Deployment Region", "SE Asia coastal network with tail-risk emphasis on dense coastal and agricultural nodes.")
     surface_card("Forecast Horizon", "2015-2100 scenario window with intervention comparisons and searchable video outputs.")
@@ -518,6 +529,37 @@ def load_opportunity_map():
 
 
 roi_data = load_roi_data()
+
+
+def _apply_capital_allocation(roi_data, capital_allocation):
+    """Return ROI data adjusted for the capital allocation slider."""
+    adjusted = {}
+    for key, data in roi_data.items():
+        entry = dict(data)
+        base_cost = INTERVENTIONS.get(key, {}).get("cost_usd")
+        if not base_cost:
+            adjusted[key] = entry
+            continue
+
+        base_cost = float(base_cost)
+        ratio = float(capital_allocation) / base_cost
+        # Diminishing returns: impact scales sublinearly with capital.
+        impact_scale = ratio ** 0.85
+
+        base_roi = float(entry.get("roi", 0.0))
+        base_loss = float(entry.get("total_loss_avoided", 0.0))
+        adjusted_loss = base_loss * impact_scale
+        adjusted_roi = (base_roi * base_cost * impact_scale) / float(capital_allocation)
+
+        entry["roi"] = adjusted_roi
+        entry["total_loss_avoided"] = adjusted_loss
+        entry["capital_allocation"] = float(capital_allocation)
+        entry["impact_scale"] = impact_scale
+        adjusted[key] = entry
+    return adjusted
+
+
+roi_data_adjusted = _apply_capital_allocation(roi_data, capital_allocation)
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -937,7 +979,7 @@ def render_math_view() -> None:
         )
 
 
-top_intervention = max(roi_data.values(), key=lambda item: item.get("roi", 0.0))
+top_intervention = max(roi_data_adjusted.values(), key=lambda item: item.get("roi", 0.0))
 training_history_path = "outputs/roi/gnn_training_history.npz"
 training_status = "Training snapshots ready" if os.path.exists(training_history_path) else "Run pipeline to generate playback"
 video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
@@ -972,6 +1014,11 @@ with hero_cols[2]:
     kpi_card("Playback", "Ready" if os.path.exists(training_history_path) else "Missing", "Training view availability")
 with hero_cols[3]:
     kpi_card("Rendered Videos", str(video_count), "Simulation clips available")
+
+st.caption(
+    f"Investor mode: metrics scale with ${capital_allocation/1e6:.0f}M total capital "
+    "(sublinear, diminishing-returns assumption)."
+)
 
 active_view = st.radio(
     "View",
@@ -1020,11 +1067,11 @@ if active_view == "Dashboard":
 
                         c1, c2, c3 = st.columns(3)
                         roi_key = metadata.get('intervention_key', '')
-                        if roi_key in roi_data:
-                            r = roi_data[roi_key]
-                            c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
-                            c2.metric('Loss Avoided', f"${r['total_loss_avoided']/1e9:.1f}B")
-                            c3.metric('Risk Reduction', f"{r['mean_risk_reduction']:.1%}")
+                    if roi_key in roi_data_adjusted:
+                        r = roi_data_adjusted[roi_key]
+                        c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
+                        c2.metric('Loss Avoided', f"${r['total_loss_avoided']/1e9:.1f}B")
+                        c3.metric('Risk Reduction', f"{r['mean_risk_reduction']:.1%}")
 
                         if metadata.get('has_tail_risk'):
                             st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
@@ -1042,21 +1089,21 @@ if active_view == "Dashboard":
         "Read the payoff of each resilience strategy across ROI, avoided loss, and risk reduction before drilling into the training playback.",
     )
 
-    cols = st.columns(len(roi_data))
-    for i, (key, data) in enumerate(roi_data.items()):
-        with cols[i]:
-            surface_card(
-                data['name'],
-                "Financial and systemic impact snapshot for the currently indexed intervention pathway.",
-            )
-            st.metric('Resilience ROI', f"{data['roi']:.2f}x",
-                       help=f"Range: {data.get('roi_lower', 0):.2f} - {data.get('roi_upper', 0):.2f}")
-            st.metric('Total Loss Avoided', f"${data.get('total_loss_avoided', 0)/1e9:.1f}B")
-            st.metric('Mean Risk Reduction', f"{data.get('mean_risk_reduction', 0):.1%}")
+cols = st.columns(len(roi_data_adjusted))
+for i, (key, data) in enumerate(roi_data_adjusted.items()):
+    with cols[i]:
+        surface_card(
+            data['name'],
+            "Financial and systemic impact snapshot, adjusted to the investor capital slider.",
+        )
+        st.metric('Resilience ROI', f"{data['roi']:.2f}x",
+                   help=f"Range: {data.get('roi_lower', 0):.2f} - {data.get('roi_upper', 0):.2f}")
+        st.metric('Total Loss Avoided', f"${data.get('total_loss_avoided', 0)/1e9:.1f}B")
+        st.metric('Mean Risk Reduction', f"{data.get('mean_risk_reduction', 0):.1%}")
 
-            tail_count = data.get('tail_risk_nodes_neutralized', 0)
-            if tail_count > 0:
-                st.error(f'Tail-Risk Nodes Neutralized: {tail_count}')
+        tail_count = data.get('tail_risk_nodes_neutralized', 0)
+        if tail_count > 0:
+            st.error(f'Tail-Risk Nodes Neutralized: {tail_count}')
 
 if active_view == "GNN Playback":
     training = load_training_history()

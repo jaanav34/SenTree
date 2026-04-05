@@ -199,6 +199,7 @@ function GraphCanvas(props: {
 export default function App() {
   const [data, setData] = useState<PlaybackData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingNote, setLoadingNote] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<Speed>("medium");
@@ -208,6 +209,28 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const playbackDataUrl = `${import.meta.env.BASE_URL}data/gnn_training_history.json`;
+
+    fetch(playbackDataUrl, { method: "HEAD" })
+      .then((response) => {
+        if (!response.ok) {
+          return;
+        }
+        const length = response.headers.get("content-length");
+        if (!length) {
+          return;
+        }
+        const bytes = Number(length);
+        if (!Number.isFinite(bytes)) {
+          return;
+        }
+        const mb = bytes / (1024 * 1024);
+        if (mb > 25) {
+          setLoadingNote(
+            `Playback data is large (${mb.toFixed(1)}MB). Re-export with a smaller sample (try SENTREE_PLAYBACK_MAX_NODES=5000) if this is slow.`
+          );
+        }
+      })
+      .catch(() => {});
 
     fetch(playbackDataUrl)
       .then(async (response) => {
@@ -231,6 +254,7 @@ export default function App() {
           return;
         }
         setData(payload);
+        setLoadingNote(null);
         setCurrentIndex(Math.max(payload.epochs.length - 1, 0));
       })
       .catch((loadError) => {
@@ -279,7 +303,14 @@ export default function App() {
   }
 
   if (!data || !currentPrediction) {
-    return <div className="app-shell"><div className="loading-panel">Loading playback data…</div></div>;
+    return (
+      <div className="app-shell">
+        <div className="loading-panel">
+          Loading playback data…
+          {loadingNote ? <div className="loading-note">{loadingNote}</div> : null}
+        </div>
+      </div>
+    );
   }
 
   const neutralizedNow = tailMask.reduce((count, flagged, index) => {

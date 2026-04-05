@@ -6,6 +6,9 @@ VENV_PY="$ROOT_DIR/.venv/bin/python"
 EXPORT_SCRIPT="$ROOT_DIR/scripts/export_gnn_playback_data.py"
 PLAYBACK_SOURCE="$ROOT_DIR/outputs/roi/gnn_training_history.npz"
 APP_DIR="$ROOT_DIR/apps/gnn-playback"
+MAX_NODES="${SENTREE_PLAYBACK_MAX_NODES:-5000}"
+MAX_EDGES="${SENTREE_PLAYBACK_MAX_EDGES:-200000}"
+SEED="${SENTREE_PLAYBACK_SEED:-0}"
 
 if [ ! -x "$VENV_PY" ]; then
   echo "ERROR: Expected virtualenv python at $VENV_PY" 1>&2
@@ -26,7 +29,7 @@ if [ ! -f "$PLAYBACK_SOURCE" ]; then
 fi
 
 cd "$ROOT_DIR"
-"$VENV_PY" "$EXPORT_SCRIPT"
+"$VENV_PY" "$EXPORT_SCRIPT" --max-nodes "$MAX_NODES" --max-edges "$MAX_EDGES" --seed "$SEED"
 
 cd "$APP_DIR"
 if [ ! -d node_modules ]; then

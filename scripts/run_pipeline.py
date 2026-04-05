@@ -182,6 +182,9 @@ with open('outputs/roi/roi_results.json', 'w') as f:
 # 7. Render videos
 print("\n[7/7] Rendering videos...")
 
+render_fps = int(os.environ.get("SENTREE_RENDER_FPS", "4"))
+render_scale = int(os.environ.get("SENTREE_RENDER_SCALE_FACTOR", "8"))
+
 with _timed(timings, "7a) build_temporal_features_raw"):
     temporal_features_raw = build_temporal_features_raw(data)
 with _timed(timings, "7b) build_temporal_features (fit/transform)"):
@@ -249,15 +252,15 @@ year_labels = years
 with _timed(timings, "7e) render_core_videos"):
     render_risk_video(baseline_risk_series, data['lats'], data['lons'],
                       'outputs/videos/baseline_risk.mp4', title='Baseline Climate Risk',
-                      year_labels=year_labels)
+                      year_labels=year_labels, fps=render_fps, scale_factor=render_scale)
 
     render_tail_risk_video(baseline_risk_series, flags_series, data['lats'], data['lons'],
                            'outputs/videos/tail_risk_escalation.mp4',
-                           year_labels=year_labels)
+                           year_labels=year_labels, fps=render_fps, scale_factor=render_scale)
 
     render_kg_video(kg_series, data['lats'], data['lons'],
                     'outputs/videos/climate_classification_shift.mp4',
-                    year_labels=year_labels)
+                    year_labels=year_labels, fps=render_fps)
 
 print("  Generating Strategic Resilience Opportunity Map...")
 # Logic: Map the DELTA (Baseline - Intervention) to show where value is created
@@ -277,7 +280,8 @@ with _timed(timings, "7f) opportunity_map (compute+render)"):
         data['lons'],
         'outputs/tail_risk_map.png',
         title='Strategic Resilience Opportunity & ROI Target Map',
-        label='Total Avoided Damage Potential (Risk Reduction)'
+        label='Total Avoided Damage Potential (Risk Reduction)',
+        scale_factor=render_scale,
     )
 
 # Save underlying grids for interactive dashboard overlays
@@ -307,6 +311,8 @@ for key in INTERVENTIONS:
             f'outputs/videos/comparison_{key}.mp4',
             intervention_name=name,
             year_labels=year_labels,
+            fps=render_fps,
+            scale_factor=render_scale,
         )
 
 print("\n" + "=" * 60)

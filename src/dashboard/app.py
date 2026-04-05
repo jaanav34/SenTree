@@ -58,6 +58,11 @@ st.markdown(
             radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 28%),
             linear-gradient(180deg, #f1eee2 0%, #e4efe8 54%, #f6f3ea 100%);
         color: var(--sentree-ink);
+        overflow-x: hidden;
+    }
+
+    html, body {
+        overflow-x: hidden;
     }
 
     .block-container {
@@ -457,8 +462,8 @@ with st.sidebar:
     st.markdown('<div class="sentree-kicker">Mission Control</div>', unsafe_allow_html=True)
     st.markdown("## Scenario Controls")
     st.markdown("Tune the climate lens, intervention package, and search posture before diving into simulations.")
-    scenario = st.selectbox('Climate Scenario', ['SSP3-7.0 (High Emissions)', 'SSP1-2.6 (Low Emissions)'])
-    intervention = st.selectbox('Intervention', ['Coastal Mangrove Restoration', 'Regenerative Agriculture', 'Both'])
+    scenario = "SSP3-7.0 (High Emissions)"
+    intervention = "Investor Mode"
     capital_allocation = st.slider(
         "Total Capital Allocation (USD)",
         min_value=5_000_000,
@@ -1033,7 +1038,6 @@ st.markdown(
             <div class="sentree-badge">Scenario: {scenario}</div>
             <div class="sentree-badge">Focus: {intervention}</div>
             <div class="sentree-badge">Region: SE Asia Coastal</div>
-            <div class="sentree-badge">{training_status}</div>
         </div>
     </div>
     """,
@@ -1054,14 +1058,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-hero_cols = st.columns(4)
+hero_cols = st.columns(3)
 with hero_cols[0]:
     kpi_card("Best ROI", f"{top_intervention.get('roi', 0):.2f}x", top_intervention["name"])
 with hero_cols[1]:
     kpi_card("Loss Avoided", _format_money_short(top_intervention.get('total_loss_avoided', 0)), "Top intervention impact")
 with hero_cols[2]:
-    kpi_card("Playback", "Ready" if os.path.exists(training_history_path) else "Missing", "Training view availability")
-with hero_cols[3]:
     kpi_card("Rendered Videos", str(video_count), "Simulation clips available")
 
 st.caption(

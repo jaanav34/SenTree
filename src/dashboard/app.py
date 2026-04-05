@@ -464,15 +464,16 @@ with st.sidebar:
     st.markdown("Tune the climate lens, intervention package, and search posture before diving into simulations.")
     scenario = "SSP3-7.0 (High Emissions)"
     intervention = "Investor Mode"
-    capital_allocation = st.slider(
+    capital_allocation_m = st.slider(
         "Total Capital Allocation (USD)",
-        min_value=5_000_000,
-        max_value=100_000_000,
-        value=50_000_000,
-        step=5_000_000,
-        format="$%d",
+        min_value=5,
+        max_value=100,
+        value=50,
+        step=5,
+        format="$%dM",
         help="Investor-mode sensitivity: adjust capital to see ROI and loss avoided update with a diminishing-returns assumption.",
     )
+    capital_allocation = int(capital_allocation_m) * 1_000_000
     st.divider()
     surface_card("Deployment Region", "SE Asia coastal network with tail-risk emphasis on dense coastal and agricultural nodes.")
     surface_card("Forecast Horizon", "2015-2100 scenario window with intervention comparisons and searchable video outputs.")
@@ -1148,6 +1149,9 @@ if active_view == "Dashboard":
                         c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
                         c2.metric('Loss Avoided', _format_money_short(r['total_loss_avoided']))
                         c3.metric('Risk Reduction', f"{r['mean_risk_reduction']:.1%}")
+                        c1.caption(
+                            f"Range: {r.get('roi_lower', 0):.2f} - {r.get('roi_upper', 0):.2f}"
+                        )
 
                         if metadata.get('has_tail_risk'):
                             st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
@@ -1161,9 +1165,12 @@ if active_view == "Dashboard":
 
     roi_rows = []
     for key, data in roi_data_adjusted.items():
+        roi_lower = float(data.get("roi_lower", 0.0))
+        roi_upper = float(data.get("roi_upper", 0.0))
         roi_rows.append({
             "Intervention": data.get("name", key),
             "ROI (x)": float(data.get("roi", 0.0)),
+            "ROI Range": f"{roi_lower:.2f} - {roi_upper:.2f}",
             "Loss Avoided ($M)": float(data.get("total_loss_avoided", 0.0)) / 1e6,
             "Mean Risk Reduction (%)": float(data.get("mean_risk_reduction", 0.0)) * 100.0,
             "Tail-Risk Nodes Neutralized": int(data.get("tail_risk_nodes_neutralized", 0)),
@@ -1200,8 +1207,8 @@ if active_view == "Dashboard":
                     y=alt.Y("Intervention:N", sort=None, title=""),
                     x=alt.X(f"{chart_metric}:Q", title=chart_metric),
                     color=alt.Color(f"{chart_metric}:Q", scale=alt.Scale(scheme="tealblues")),
-                    tooltip=["Intervention", chart_metric],
-                )
+                tooltip=["Intervention", chart_metric, "ROI Range"],
+            )
                 .properties(height=35 * len(chart_df))
             )
             st.altair_chart(chart, use_container_width=True)

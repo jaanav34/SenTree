@@ -18,8 +18,8 @@ KEYS_FILE="${SENTREE_KEYS_FILE:-outputs/roi/risk_series/intervention_keys.txt}"
 
 if [[ ! -f "$KEYS_FILE" ]]; then
   echo "Missing keys file: $KEYS_FILE"
-  echo "Generate it with: python scripts/export_intervention_keys.py --out-dir outputs/roi/risk_series"
-  exit 1
+  echo "Generating keys file..."
+  python scripts/export_intervention_keys.py --out-dir "$(dirname "$KEYS_FILE")"
 fi
 
 N="$(wc -l < "$KEYS_FILE" | tr -d ' ')"
@@ -35,4 +35,3 @@ sbatch \
   --export=ALL,SENTREE_KEYS_FILE="$KEYS_FILE" \
   --array="1-$N" \
   jobs/render_comparisons_array.sbatch
-

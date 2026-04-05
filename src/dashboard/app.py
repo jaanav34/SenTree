@@ -638,28 +638,6 @@ def _portfolio_mix(top_df: pd.DataFrame, strategy: str) -> pd.DataFrame:
     return work
 
 
-def _build_investment_memo(top_df: pd.DataFrame, capital_allocation: float, strategy: str) -> str:
-    if top_df.empty:
-        return "No intervention data available. Run scripts/run_pipeline.py to generate ROI outputs."
-
-    lines = [
-        "SenTree Investment Committee Brief",
-        "=" * 34,
-        f"Total Capital Allocation: {_format_money_short(capital_allocation)}",
-        f"Portfolio Strategy: {strategy}",
-        "",
-        "Top Recommendations:",
-    ]
-    for i, row in top_df.iterrows():
-        lines.append(
-            f"{i+1}. {row['Intervention']} | ROI {row['ROI (x)']:.2f}x | "
-            f"Loss Avoided {_format_money_short(row['Loss Avoided ($M)'] * 1e6)} | "
-            f"Confidence {row['Confidence (%)']:.0f}%"
-        )
-        lines.append(f"   Climate fit: {row['Climate Fit']}")
-    return "\n".join(lines)
-
-
 def _haversine_km(lat1, lon1, lat2, lon2):
     """Vectorized haversine distance (km)."""
     R = 6371.0
@@ -1122,13 +1100,14 @@ st.caption(
 
 active_view = st.radio(
     "View",
-    ["Dashboard", "Investor Brief", "GNN Playback", "Math"],
+    ["Dashboard", "Recommendation", "GNN Playback", "Math"],
     horizontal=True,
     label_visibility="collapsed",
     key="sentree_view",
 )
+st.caption("Navigation: Dashboard = search + media, Recommendation = investment ranking + comparison analytics, GNN Playback = training dynamics, Math = model equations.")
 
-if active_view == "Investor Brief":
+if active_view == "Recommendation":
     section_header(
         "Decide",
         "Investment committee brief",
@@ -1159,7 +1138,7 @@ if active_view == "Investor Brief":
                 ],
                 use_container_width=True,
                 hide_index=True,
-                height=250,
+                height=min(520, 42 * (len(top_shortlist) + 1)),
                 column_config={
                     "Investor Score": st.column_config.NumberColumn(format="%.2f"),
                     "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
@@ -1168,6 +1147,14 @@ if active_view == "Investor Brief":
                     "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.0f"),
                 },
             )
+            st.markdown("**Why these 3 interventions?**")
+            top_three_reasons = investor_rank.head(3)
+            for _, row in top_three_reasons.iterrows():
+                st.markdown(
+                    f"**{row['Intervention']}** | Score {row['Investor Score']:.2f} | "
+                    f"Confidence {row['Confidence (%)']:.0f}% | Tail-risk nodes neutralized: {int(row['Tail-Risk Nodes'])}"
+                )
+                st.caption(f"Climate fit: {row['Climate Fit']}")
 
         with brief_cols[1]:
             strategy = st.selectbox(
@@ -1202,22 +1189,12 @@ if active_view == "Investor Brief":
             )
             st.altair_chart(mix_chart, use_container_width=True)
 
-            memo_text = _build_investment_memo(top_three, capital_allocation, strategy)
-            st.download_button(
-                "Download Investment Memo",
-                data=memo_text,
-                file_name="sentree_investment_memo.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
-
-            with st.expander("Why these 3 interventions?", expanded=False):
-                for _, row in top_three.iterrows():
-                    st.markdown(
-                        f"**{row['Intervention']}**\n\n"
-                        f"Climate fit: {row['Climate Fit']}\n\n"
-                        f"Confidence: {row['Confidence (%)']:.0f}% | Tail-risk nodes neutralized: {int(row['Tail-Risk Nodes'])}"
-                    )
+            st.markdown("**Investment memo lines**")
+            for _, row in top_three.iterrows():
+                st.markdown(
+                    f"- Allocate about {_format_money_short(row['Allocated Capital ($M)'] * 1e6)} to **{row['Intervention']}** "
+                    f"(ROI {row['ROI (x)']:.2f}x, confidence {row['Confidence (%)']:.0f}%)."
+                )
 
 if active_view == "Dashboard":
     section_header(
@@ -1294,7 +1271,7 @@ if active_view == "Dashboard":
 
                         if metadata.get('has_tail_risk'):
                             st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
-if active_view == "Dashboard":
+if active_view == "Recommendation":
     # --- Metrics Dashboard ---
     section_header(
         "Compare",

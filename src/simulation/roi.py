@@ -25,6 +25,14 @@ def compute_roi(baseline_risk, intervention_risk, cost, gdp_flat, pop_flat,
     Uncertainty decomposition (Ito 2020):
         U_total = sqrt(U_precip^2 + U_model^2 + U_scenario^2)
     """
+    baseline_risk = np.asarray(baseline_risk, dtype=np.float64)
+    intervention_risk = np.asarray(intervention_risk, dtype=np.float64)
+    if baseline_risk.shape != intervention_risk.shape:
+        raise ValueError(
+            f"baseline_risk and intervention_risk must have same shape, got "
+            f"{baseline_risk.shape} vs {intervention_risk.shape}"
+        )
+
     # Economic exposure per node.
     #
     # We want risk * exposure to produce a dollar-denominated loss that,
@@ -35,7 +43,6 @@ def compute_roi(baseline_risk, intervention_risk, cost, gdp_flat, pop_flat,
     #
     # Exposure = GDP_percapita * pop_density_norm * cell_weight
     # where cell_weight converts to consistent units.
-    N = len(baseline_risk)
     pop_norm = pop_flat / (pop_flat.max() + 1e-8)
     gdp_norm = gdp_flat / (gdp_flat.max() + 1e-8)
 
@@ -48,19 +55,34 @@ def compute_roi(baseline_risk, intervention_risk, cost, gdp_flat, pop_flat,
     economic_exposure = exposure_index * exposure_scale
 
     # Loss proxy: risk_score * exposure (USD)
-    loss_baseline = baseline_risk * economic_exposure
-    loss_intervention = intervention_risk * economic_exposure
+    if baseline_risk.ndim == 1:
+        loss_baseline = baseline_risk * economic_exposure
+        loss_intervention = intervention_risk * economic_exposure
+        annual_avoided = np.array([np.sum(loss_baseline - loss_intervention)], dtype=np.float64)
+    elif baseline_risk.ndim == 2:
+        # Time-series mode: each row is one period.
+        loss_baseline = baseline_risk * economic_exposure[None, :]
+        loss_intervention = intervention_risk * economic_exposure[None, :]
+        annual_avoided = np.sum(loss_baseline - loss_intervention, axis=1)
+    else:
+        raise ValueError(
+            f"Expected risk arrays to be 1D or 2D, got baseline_risk.ndim={baseline_risk.ndim}"
+        )
 
-    # Discounted loss avoided over time horizon
+    # Discounted loss avoided over horizon.
+    # Important: if only a snapshot is provided, do not replay the same annual
+    # value for multiple years (that was inflating ROI). We discount only the
+    # periods we actually have.
+    horizon = int(min(max(1, n_years), annual_avoided.shape[0]))
     total_loss_avoided = 0.0
     annual_loss_avoided = []
-    for t in range(n_years):
-        gamma = (1 / (1 + discount_rate)) ** t
-        annual = np.sum(loss_baseline - loss_intervention) * gamma
+    for t in range(horizon):
+        gamma = (1 / (1 + discount_rate)) ** (t + 1)
+        annual = annual_avoided[t] * gamma
         total_loss_avoided += annual
         annual_loss_avoided.append(float(annual))
 
-    roi = total_loss_avoided / cost
+    roi = total_loss_avoided / (float(cost) + 1e-8)
 
     # Multi-source uncertainty (Ito 2020 framework)
     u_precip = _compute_precip_uncertainty(precip_data) if precip_data is not None else 0
@@ -87,7 +109,7 @@ def compute_roi(baseline_risk, intervention_risk, cost, gdp_flat, pop_flat,
         'mean_risk_reduction': float(np.mean(baseline_risk - intervention_risk)),
         'max_risk_reduction': float(np.max(baseline_risk - intervention_risk)),
         'nodes_improved': int(np.sum(intervention_risk < baseline_risk)),
-        'nodes_total': len(baseline_risk),
+        'nodes_total': int(baseline_risk.shape[-1]),
     }
 
 

@@ -358,15 +358,6 @@ def render_tail_risk_map(value_grid, flags_grid, lats, lons, output_path,
                c='red', s=70, marker='X', label='High-Risk / High-ROI Target', 
                edgecolors='white', linewidths=0.5, zorder=5)
 
-    # Precise Coordinate Annotation for Top 3 ROI Nodes
-    top_indices = np.argsort(value_grid.flatten())[-3:]
-    for idx in top_indices:
-        ax.annotate(f"Target: ({lon_flat[idx]:.2f}E, {lat_flat[idx]:.2f}N)",
-                    (lon_flat[idx], lat_flat[idx]),
-                    textcoords="offset points", xytext=(10,10), 
-                    ha='left', fontsize=9, color='darkred', fontweight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", alpha=0.7))
-
     ax.set_title(title, fontsize=16, fontweight='bold')
     ax.set_xlabel('Longitude (°E)')
     ax.set_ylabel('Latitude (°N)')

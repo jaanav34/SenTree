@@ -53,4 +53,9 @@ fi
 echo "Rendering comparison video for key=$KEY (task $TASK_ID)"
 echo "FPS=${SENTREE_RENDER_FPS:-4} SCALE=${SENTREE_RENDER_SCALE_FACTOR:-8} DPI=${SENTREE_RENDER_DPI:-}"
 
+if [[ -z "${SENTREE_FFMPEG_THREADS:-}" ]]; then
+  export SENTREE_FFMPEG_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+fi
+echo "FFMPEG_THREADS=${SENTREE_FFMPEG_THREADS} PRESET=${SENTREE_FFMPEG_PRESET:-} CRF=${SENTREE_FFMPEG_CRF:-}"
+
 python scripts/render_comparison_from_npz.py --key "$KEY" --names-json "$NAMES_JSON"

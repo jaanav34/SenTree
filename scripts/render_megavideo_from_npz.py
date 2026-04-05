@@ -61,6 +61,12 @@ def main() -> int:
     parser.add_argument("--ncols", type=int, default=6, help="Grid columns for mode=grid.")
     parser.add_argument("--cmap", default="YlOrRd")
     parser.add_argument(
+        "--grid-kind",
+        choices=["delta", "intervention"],
+        default="delta",
+        help="For mode=grid, render either risk reduction deltas (delta) or absolute intervention risk (intervention).",
+    )
+    parser.add_argument(
         "--progress",
         action="store_true",
         help="Print progress updates (frame/year) to stderr so `tail -f` is useful.",
@@ -150,7 +156,7 @@ def main() -> int:
 
     if args.progress:
         print(
-            f"[mega] loaded interventions={len(keys)} from series_dir={Path(args.series_dir)}",
+            f"[mega] loaded interventions={len(keys)} from series_dir={Path(args.series_dir)} mode={args.mode} grid_kind={args.grid_kind} fps={args.fps}",
             file=sys.stderr,
             flush=True,
         )
@@ -226,21 +232,58 @@ def main() -> int:
     ax_base.set_xticks([])
     ax_base.set_yticks([])
 
-    # Determine a stable delta color scale.
-    sample_t = int(frame_year_indices[0])
-    sample_deltas = []
-    for key in keys[: min(8, len(keys))]:
-        sample_deltas.append(np.clip(baseline[sample_t] - interventions[key][sample_t], 0.0, None))
-    stacked = np.stack(sample_deltas, axis=0) if sample_deltas else np.zeros((1,) + baseline[sample_t].shape, dtype=np.float32)
-    delta_vmax = float(np.nanpercentile(stacked, 99.5))
-    delta_vmax = max(delta_vmax, 1e-6)
+    delta_vmax = None
+    risk_vmin = base_vmin
+    risk_vmax = base_vmax
+    if args.grid_kind == "delta":
+        # Determine a stable delta color scale.
+        sample_t = int(frame_year_indices[0])
+        sample_deltas = []
+        for key in keys[: min(8, len(keys))]:
+            sample_deltas.append(np.clip(baseline[sample_t] - interventions[key][sample_t], 0.0, None))
+        stacked = (
+            np.stack(sample_deltas, axis=0)
+            if sample_deltas
+            else np.zeros((1,) + baseline[sample_t].shape, dtype=np.float32)
+        )
+        delta_vmax = float(np.nanpercentile(stacked, 99.5))
+        delta_vmax = max(delta_vmax, 1e-6)
+    else:
+        # Match the comparison-video semantics: use a shared vmin/vmax across
+        # baseline + all intervention grids so all panels are comparable.
+        risk_vmin = float(np.nanmin(baseline))
+        risk_vmax = float(np.nanmax(baseline))
+        for arr in interventions.values():
+            risk_vmin = float(min(risk_vmin, np.nanmin(arr)))
+            risk_vmax = float(max(risk_vmax, np.nanmax(arr)))
 
     ims_delta = []
     for idx, key in enumerate(keys, start=1):
         ax = axes[idx]
-        delta = np.clip(baseline[t0] - interventions[key][t0], 0.0, None)
-        im = ax.imshow(delta, origin="lower", extent=extent, cmap="Greens", vmin=0.0, vmax=delta_vmax, aspect="auto")
-        ax.set_title(names.get(key, key), fontsize=8, loc="left")
+        if args.grid_kind == "delta":
+            delta = np.clip(baseline[t0] - interventions[key][t0], 0.0, None)
+            im = ax.imshow(
+                delta,
+                origin="lower",
+                extent=extent,
+                cmap="Greens",
+                vmin=0.0,
+                vmax=float(delta_vmax),
+                aspect="auto",
+            )
+            ax.set_title(names.get(key, key), fontsize=8, loc="left")
+        else:
+            grid = interventions[key][t0]
+            im = ax.imshow(
+                grid,
+                origin="lower",
+                extent=extent,
+                cmap=args.cmap,
+                vmin=risk_vmin,
+                vmax=risk_vmax,
+                aspect="auto",
+            )
+            ax.set_title(f"With {names.get(key, key)}", fontsize=8, loc="left")
         ax.set_xticks([])
         ax.set_yticks([])
         ims_delta.append((key, im, ax))
@@ -254,10 +297,11 @@ def main() -> int:
         fig.colorbar(im_base, ax=ax_base, fraction=0.03, pad=0.01)
     except Exception:
         pass
-    try:
-        fig.colorbar(ims_delta[0][1], ax=[ax for _, _, ax in ims_delta], fraction=0.02, pad=0.01)
-    except Exception:
-        pass
+    if ims_delta:
+        try:
+            fig.colorbar(ims_delta[0][1], ax=[ax for _, _, ax in ims_delta], fraction=0.02, pad=0.01)
+        except Exception:
+            pass
 
     if len(frame_year_indices) == 1:
         # Single-frame video: repeat the same frame for hold-seconds.
@@ -274,7 +318,10 @@ def main() -> int:
         im_base.set_data(base_grid)
         ax_base.set_title(f"Baseline — {yr}", fontsize=10, loc="left")
         for key, im, _ax in ims_delta:
-            im.set_data(np.clip(base_grid - interventions[key][t_idx], 0.0, None))
+            if args.grid_kind == "delta":
+                im.set_data(np.clip(base_grid - interventions[key][t_idx], 0.0, None))
+            else:
+                im.set_data(interventions[key][t_idx])
         if args.progress and (frame % max(1, int(args.progress_every)) == 0):
             elapsed = float(time.perf_counter() - t_start)
             print(

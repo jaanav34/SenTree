@@ -1348,75 +1348,103 @@ if active_view == "Recommendation":
         )
 
 if active_view == "GNN Playback":
-    training = load_training_history()
-
-    # --- GNN Training Animation ---
     section_header(
         "Playback",
-        "Interactive GNN training playback",
-        "Scrub through epochs to see how node-level risk estimates stabilize and how the optimizer reshapes the graph-wide profile.",
+        "GNN training playback",
+        "View the dedicated React playback UI directly inside Streamlit, with a Streamlit-native fallback for quick checks.",
     )
 
-    if training is None:
-        st.info("Training history not found yet. Re-run `python scripts/run_pipeline.py` to generate `outputs/roi/gnn_training_history.npz`.")
+    playback_mode = st.radio(
+        "Playback UI",
+        ["Embedded React app", "Streamlit fallback"],
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="sentree_playback_mode",
+    )
+
+    if playback_mode == "Embedded React app":
+        import streamlit.components.v1 as components
+
+        default_url = os.environ.get("SENTREE_GNN_PLAYBACK_URL", "http://localhost:4173/").strip()
+        playback_url = st.text_input(
+            "React app URL",
+            value=default_url,
+            help=(
+                "This should be reachable from your laptop browser. "
+                "When using SSH port forwarding, this is typically http://localhost:4173/."
+            ),
+            key="sentree_gnn_playback_url",
+        )
+        st.caption(
+            "If the embed is blank, verify the Vite dev server is running on the compute node and your SSH tunnel forwards its port."
+        )
+        components.iframe(playback_url, height=920, scrolling=True)
     else:
-        total_epochs = int(len(training["epochs"]))
-        if "training_epoch_idx" not in st.session_state:
-            st.session_state.training_epoch_idx = total_epochs - 1
-        if "training_playing" not in st.session_state:
-            st.session_state.training_playing = False
-        st.session_state.training_epoch_idx = min(max(int(st.session_state.training_epoch_idx), 0), total_epochs - 1)
-
-        control_cols = st.columns([4, 1, 1, 1, 1.2])
-        epoch_selected = control_cols[0].slider(
-            "Epoch",
-            min_value=1,
-            max_value=total_epochs,
-            value=st.session_state.training_epoch_idx + 1,
-            disabled=st.session_state.training_playing,
-            key="training_epoch_slider",
-        )
-        play_btn = control_cols[1].button(
-            "Resume" if st.session_state.training_playing else "Play",
-            use_container_width=True,
-            key="training_play_btn",
-        )
-        pause_btn = control_cols[2].button("Pause", use_container_width=True, key="training_pause_btn")
-        reset_btn = control_cols[3].button("Reset", use_container_width=True, key="training_reset_btn")
-        playback_speed = control_cols[4].selectbox("Speed", ["Slow", "Medium", "Fast"], index=1, key="training_speed")
-        highlight_targets = st.checkbox("Highlight hardest tail-risk targets", value=True)
-
-        if play_btn:
-            st.session_state.training_playing = True
-        if pause_btn:
-            st.session_state.training_playing = False
-        if reset_btn:
-            st.session_state.training_epoch_idx = 0
-            st.session_state.training_playing = False
-        elif not st.session_state.training_playing:
-            st.session_state.training_epoch_idx = epoch_selected - 1
-
-        speed_seconds = {"Slow": 0.18, "Medium": 0.07, "Fast": 0.02}[playback_speed]
-        metrics_placeholder = st.empty()
-        viz_placeholder = st.empty()
-
-        render_training_frame(
-            viz_placeholder,
-            metrics_placeholder,
-            training,
-            st.session_state.training_epoch_idx,
-            show_edges=True,
-            highlight_targets=highlight_targets,
-        )
-
-        if st.session_state.training_playing:
-            if st.session_state.training_epoch_idx >= total_epochs - 1:
+        training = load_training_history()
+        if training is None:
+            st.info(
+                "Training history not found yet. Re-run `python scripts/run_pipeline.py` to generate `outputs/roi/gnn_training_history.npz`."
+            )
+        else:
+            total_epochs = int(len(training["epochs"]))
+            if "training_epoch_idx" not in st.session_state:
+                st.session_state.training_epoch_idx = total_epochs - 1
+            if "training_playing" not in st.session_state:
                 st.session_state.training_playing = False
-            else:
-                import time
-                time.sleep(speed_seconds)
-                st.session_state.training_epoch_idx += 1
-                st.rerun()
+            st.session_state.training_epoch_idx = min(max(int(st.session_state.training_epoch_idx), 0), total_epochs - 1)
+
+            control_cols = st.columns([4, 1, 1, 1, 1.2])
+            epoch_selected = control_cols[0].slider(
+                "Epoch",
+                min_value=1,
+                max_value=total_epochs,
+                value=st.session_state.training_epoch_idx + 1,
+                disabled=st.session_state.training_playing,
+                key="training_epoch_slider",
+            )
+            play_btn = control_cols[1].button(
+                "Resume" if st.session_state.training_playing else "Play",
+                use_container_width=True,
+                key="training_play_btn",
+            )
+            pause_btn = control_cols[2].button("Pause", use_container_width=True, key="training_pause_btn")
+            reset_btn = control_cols[3].button("Reset", use_container_width=True, key="training_reset_btn")
+            playback_speed = control_cols[4].selectbox("Speed", ["Slow", "Medium", "Fast"], index=1, key="training_speed")
+            highlight_targets = st.checkbox("Highlight hardest tail-risk targets", value=True)
+
+            if play_btn:
+                st.session_state.training_playing = True
+            if pause_btn:
+                st.session_state.training_playing = False
+            if reset_btn:
+                st.session_state.training_epoch_idx = 0
+                st.session_state.training_playing = False
+            elif not st.session_state.training_playing:
+                st.session_state.training_epoch_idx = epoch_selected - 1
+
+            speed_seconds = {"Slow": 0.18, "Medium": 0.07, "Fast": 0.02}[playback_speed]
+            metrics_placeholder = st.empty()
+            viz_placeholder = st.empty()
+
+            render_training_frame(
+                viz_placeholder,
+                metrics_placeholder,
+                training,
+                st.session_state.training_epoch_idx,
+                show_edges=True,
+                highlight_targets=highlight_targets,
+            )
+
+            if st.session_state.training_playing:
+                if st.session_state.training_epoch_idx >= total_epochs - 1:
+                    st.session_state.training_playing = False
+                else:
+                    import time
+
+                    time.sleep(speed_seconds)
+                    st.session_state.training_epoch_idx += 1
+                    st.rerun()
 
 if active_view == "Dashboard":
     ts = load_risk_timeseries()

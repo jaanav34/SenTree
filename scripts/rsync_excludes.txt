@@ -1,0 +1,27 @@
+.git/
+.venv/
+.tmp/
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets / environment
+.env
+.env.*
+
+# Frontend build / deps (never sync)
+apps/gnn-playback/node_modules/
+apps/gnn-playback/dist/
+apps/gnn-playback/.vite/
+
+# Bundled Node binaries copied on cluster (not needed on laptop)
+node-v*-linux-x64/
+node-v*-linux-x64.tar.xz
+
+# OS / IDE noise
+.DS_Store
+Thumbs.db

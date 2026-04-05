@@ -25,6 +25,34 @@ from src.simulation.interventions import INTERVENTIONS, climate_fit_summary
 
 st.set_page_config(page_title='SenTree - Resilience ROI Dashboard', layout='wide', initial_sidebar_state="expanded")
 
+_LOGO_CANDIDATES = (
+    "sentree logo.png",
+    "sentree logo.jpg",
+    "sentree logo.jpeg",
+    "sentree logo.webp",
+    "sentree logo.gif",
+)
+
+_MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+
+def _find_logo_path() -> Path | None:
+    for filename in _LOGO_CANDIDATES:
+        candidate = Path("data") / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _mime_for_path(path: Path) -> str:
+    return _MIME_BY_EXT.get(path.suffix.lower(), "application/octet-stream")
+
 st.markdown(
     """
     <style>
@@ -154,6 +182,46 @@ st.markdown(
         box-shadow: 0 8px 22px rgba(23, 52, 47, 0.12);
         background: rgba(255, 255, 255, 0.8);
         padding: 0.25rem;
+        cursor: pointer;
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .sentree-hero-logo img:hover {
+        transform: scale(1.06);
+        box-shadow: 0 12px 32px rgba(23, 52, 47, 0.22);
+    }
+
+    /* Logo fullscreen overlay — CSS-only, no JS */
+    .sentree-logo-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        background: #ffffff;
+        align-items: center;
+        justify-content: center;
+        cursor: zoom-out;
+    }
+
+    #sentree-logo-toggle:checked ~ .sentree-logo-overlay {
+        display: flex;
+    }
+
+    .sentree-logo-overlay img {
+        width: 100vw;
+        height: 100vh;
+        object-fit: contain;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        background: transparent;
+        padding: 0;
+        animation: sentree-modal-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+
+    @keyframes sentree-modal-in {
+        from { opacity: 0; transform: scale(0.88); }
+        to   { opacity: 1; transform: scale(1); }
     }
 
     .sentree-badges {
@@ -1236,13 +1304,21 @@ training_status = "Training snapshots ready" if os.path.exists(training_history_
 video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
 
 logo_markup = ""
-logo_path = Path("data/sentree logo.jpg")
-if logo_path.exists():
+logo_modal_html = ""
+logo_path = _find_logo_path()
+if logo_path is not None:
+    mime = _mime_for_path(logo_path)
     logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
     logo_markup = (
-        "<div class='sentree-hero-logo'>"
-        f"<img src='data:image/jpeg;base64,{logo_b64}' alt='SenTree logo' />"
-        "</div>"
+        f"<label for='sentree-logo-toggle' class='sentree-hero-logo'>"
+        f"<img src='data:{mime};base64,{logo_b64}' alt='SenTree logo' />"
+        f"</label>"
+    )
+    logo_modal_html = (
+        f"<input type='checkbox' id='sentree-logo-toggle' style='display:none' />"
+        f"<label for='sentree-logo-toggle' class='sentree-logo-overlay'>"
+        f"<img src='data:{mime};base64,{logo_b64}' alt='SenTree logo full' />"
+        f"</label>"
     )
 
 if active_section == "Overview":
@@ -1266,6 +1342,7 @@ if active_section == "Overview":
                 {logo_markup}
             </div>
         </div>
+        {logo_modal_html}
         """,
         unsafe_allow_html=True,
     )

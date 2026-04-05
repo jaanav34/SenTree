@@ -1,7 +1,9 @@
 data/raw/
+data/raw
 data/processed/
 outputs/
 scripts/.cache/
+.tmp/
 .venv/
 __pycache__/
 *.pyc

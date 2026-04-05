@@ -1305,7 +1305,7 @@ if active_section == "Overview":
         f"""
         <div class="sentree-card" style="margin-top:0.9rem;">
             <div class="sentree-section-label">AI Resilience Summary</div>
-            <p><strong>Our GNN has flagged {summary_tail} tail-risk nodes</strong> in the SE Asia coastal corridor.
+            <p><strong>Our GNN has flagged {summary_tail} tail-risk nodes</strong>.
             Allocating {_format_money_short(capital_allocation)} toward <strong>{summary_name}</strong> avoids about
             {summary_loss} in projected GDP losses by 2045 —
             a <strong>{summary_roi:.2f}x Resilience ROI</strong> at {summary_conf*100:.0f}% confidence.</p>
@@ -2353,6 +2353,6 @@ st.markdown("""
     <span style="color:rgba(74,97,89,0.4);">|</span>
     <span>ML@Purdue Catapult Hackathon</span>
     <span style="color:rgba(74,97,89,0.4);">|</span>
-    <span>SE Asia · SSP3-7.0 · 2015–2100</span>
+    <span>SSP3-7.0 · 2015–2100</span>
 </div>
 """, unsafe_allow_html=True)

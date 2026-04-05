@@ -1410,97 +1410,122 @@ if active_view == "Dashboard":
         "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model’s extreme-regime threshold.",
     )
     if opportunity is not None:
-        st.markdown("**Interactive 3D Opportunity Overlay** (hover any cell to see a real-world label).")
-        try:
-            import pydeck as pdk
+        map_mode = st.selectbox(
+            "Map view",
+            [
+                "2D ROI map (basemap)",
+                "3D ROI extrusion (slower)",
+                "Static ROI PNG",
+            ],
+            index=0,
+            help=(
+                "2D mode keeps the ROI grid but uses a basemap so you can see continents/borders. "
+                "3D extrusion is heavier and can look distorted near the poles. "
+                "Static PNG is fastest but has no basemap context."
+            ),
+            key="sentree_map_mode",
+        )
 
-            df_pts, (vmin, vmax) = _opportunity_points(opportunity)
+        if map_mode != "Static ROI PNG":
+            st.markdown("Hover any cell to see a real-world label (nearest city + distance).")
+            try:
+                import pydeck as pdk
 
-            with st.expander("Map debug (lat/lon ranges)"):
-                lats_dbg = np.asarray(opportunity["lats"], dtype=np.float64)
-                lons_raw_dbg = np.asarray(opportunity["lons"], dtype=np.float64)
-                lons_dbg = _wrap_lon_180(lons_raw_dbg)
-                st.write(
-                    {
-                        "lat_min": float(np.nanmin(lats_dbg)),
-                        "lat_max": float(np.nanmax(lats_dbg)),
-                        "lon_min_raw": float(np.nanmin(lons_raw_dbg)),
-                        "lon_max_raw": float(np.nanmax(lons_raw_dbg)),
-                        "lon_min_wrapped": float(np.nanmin(lons_dbg)),
-                        "lon_max_wrapped": float(np.nanmax(lons_dbg)),
-                        "n_points": int(len(df_pts)),
-                    }
+                df_pts, (vmin, vmax) = _opportunity_points(opportunity)
+
+                with st.expander("Map debug (lat/lon ranges)"):
+                    lats_dbg = np.asarray(opportunity["lats"], dtype=np.float64)
+                    lons_raw_dbg = np.asarray(opportunity["lons"], dtype=np.float64)
+                    lons_dbg = _wrap_lon_180(lons_raw_dbg)
+                    st.write(
+                        {
+                            "lat_min": float(np.nanmin(lats_dbg)),
+                            "lat_max": float(np.nanmax(lats_dbg)),
+                            "lon_min_raw": float(np.nanmin(lons_raw_dbg)),
+                            "lon_max_raw": float(np.nanmax(lons_raw_dbg)),
+                            "lon_min_wrapped": float(np.nanmin(lons_dbg)),
+                            "lon_max_wrapped": float(np.nanmax(lons_dbg)),
+                            "n_points": int(len(df_pts)),
+                        }
+                    )
+
+                # Optional downsample for performance if needed.
+                # 16k points (global coarsen=4) is fine; only downsample when extremely large.
+                max_points = 50_000
+                if len(df_pts) > max_points:
+                    df_pts = df_pts.sample(max_points, random_state=0)
+
+                lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
+                lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
+                zoom = _suggest_pydeck_zoom(lat_span, lon_span)
+                pitch = 0
+                if map_mode == "3D ROI extrusion (slower)":
+                    pitch = 0 if zoom <= 2.2 else 50
+
+                view = pdk.ViewState(
+                    latitude=float(df_pts["lat"].median()),
+                    longitude=float(df_pts["lon"].median()),
+                    zoom=zoom,
+                    pitch=pitch,
                 )
 
-            # Optional downsample for performance if needed.
-            # 16k points (global coarsen=4) is fine; only downsample when extremely large.
-            max_points = 50_000
-            if len(df_pts) > max_points:
-                df_pts = df_pts.sample(max_points, random_state=0)
-
-            lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
-            lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
-            zoom = _suggest_pydeck_zoom(lat_span, lon_span)
-            pitch = 0 if zoom <= 2.2 else 50
-
-            view = pdk.ViewState(
-                latitude=float(df_pts["lat"].median()),
-                longitude=float(df_pts["lon"].median()),
-                zoom=zoom,
-                pitch=pitch,
-            )
-
-            # Grid cells (3D extruded)
-            cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
-            elevation_scale = 4000.0  # tune for visibility
-            layer_cells = pdk.Layer(
-                "GridCellLayer",
-                data=df_pts,
-                get_position=["lon", "lat"],
-                get_elevation="value",
-                elevation_scale=elevation_scale,
-                cell_size=cell_size_m,
-                extruded=True,
-                pickable=True,
-                get_fill_color="color",
-            )
-
-            # Tail-risk flags (red dots overlaid)
-            flagged = df_pts[df_pts["tail_flag"]].copy()
-            layer_flags = pdk.Layer(
-                "ScatterplotLayer",
-                data=flagged,
-                get_position=["lon", "lat"],
-                get_radius=max(10_000, int(round(0.45 * cell_size_m))),
-                get_fill_color=[230, 30, 30, 190],
-                pickable=True,
-            )
-
-            tooltip = {
-                "text": (
-                    "Lon: {lon}\nLat: {lat}\n"
-                    "Avoided damage potential: {value}\n"
-                    "Tail-risk flagged: {tail_flag}\n"
-                    "Nearest: {nearest_city} (~{nearest_km} km)"
+                # Grid cells (ROI heatmap)
+                cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
+                extruded = map_mode == "3D ROI extrusion (slower)"
+                elevation_scale = 4000.0 if extruded else 1.0  # ignored when extruded=False
+                layer_cells = pdk.Layer(
+                    "GridCellLayer",
+                    data=df_pts,
+                    get_position=["lon", "lat"],
+                    get_elevation="value",
+                    elevation_scale=elevation_scale,
+                    cell_size=cell_size_m,
+                    extruded=extruded,
+                    pickable=True,
+                    get_fill_color="color",
+                    opacity=0.68 if not extruded else 0.85,
                 )
-            }
 
-            deck = pdk.Deck(
-                layers=[layer_cells, layer_flags],
-                initial_view_state=view,
-                tooltip=tooltip,
-                map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-            )
-            st.pydeck_chart(deck, width='stretch')
-            st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
-        except Exception as e:
-            st.info(f"Interactive map unavailable ({e}). Showing static map below.")
+                # Tail-risk flags (red dots overlaid)
+                flagged = df_pts[df_pts["tail_flag"]].copy()
+                layer_flags = pdk.Layer(
+                    "ScatterplotLayer",
+                    data=flagged,
+                    get_position=["lon", "lat"],
+                    get_radius=max(10_000, int(round(0.45 * cell_size_m))),
+                    get_fill_color=[230, 30, 30, 190],
+                    pickable=True,
+                )
+
+                tooltip = {
+                    "text": (
+                        "Lon: {lon}\nLat: {lat}\n"
+                        "Avoided damage potential: {value}\n"
+                        "Tail-risk flagged: {tail_flag}\n"
+                        "Nearest: {nearest_city} (~{nearest_km} km)"
+                    )
+                }
+
+                deck = pdk.Deck(
+                    layers=[layer_cells, layer_flags],
+                    initial_view_state=view,
+                    tooltip=tooltip,
+                    map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+                )
+                st.pydeck_chart(deck, width='stretch')
+                st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
+            except Exception as e:
+                st.info(f"Interactive map unavailable ({e}). Showing static map below.")
 
     tail_risk_img = 'outputs/tail_risk_map.png'
-    if os.path.exists(tail_risk_img):
-        st.image(tail_risk_img, width='stretch')
+    if opportunity is not None and st.session_state.get("sentree_map_mode") != "Static ROI PNG":
+        # The interactive basemap is shown above; only show PNG when explicitly requested or as fallback.
+        pass
     else:
-        st.info('Tail-risk map not generated yet.')
+        if os.path.exists(tail_risk_img):
+            st.image(tail_risk_img, width='stretch')
+        else:
+            st.info('Tail-risk map not generated yet.')
 
 if active_view == "Math":
     render_math_view()

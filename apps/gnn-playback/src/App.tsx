@@ -208,6 +208,18 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    // If the data was injected by Streamlit's components.html() via a
+    // <script> tag, use it directly — no fetch() needed.
+    const injected = (window as unknown as Record<string, unknown>).__SENTREE_PLAYBACK_DATA__ as PlaybackData | undefined;
+    if (injected) {
+      setData(injected);
+      setLoadingNote(null);
+      setCurrentIndex(Math.max(injected.epochs.length - 1, 0));
+      return;
+    }
+
+    // Otherwise, fetch from the co-located JSON file (Vite dev server).
     const playbackDataUrl = `${import.meta.env.BASE_URL}data/gnn_training_history.json`;
 
     fetch(playbackDataUrl, { method: "HEAD" })

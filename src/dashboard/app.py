@@ -789,6 +789,7 @@ def load_roi_data():
 
 
 @st.cache_data
+@st.cache_data
 def load_risk_timeseries():
     path = "outputs/roi/risk_timeseries.json"
     if os.path.exists(path):
@@ -1521,87 +1522,79 @@ if active_section == "Overview":
     )
 
     with st.expander("Technical detail: EWMA smoothing, standardized momentum, and regime classification", expanded=False):
-        st.markdown(
-            dedent("""\
-                **Step 1 — EWMA Smoothing** (`src/tail_risk/volatility.py`)
+        st.markdown(dedent(r"""
+**Step 1 — EWMA Smoothing** (`src/tail_risk/volatility.py`)
 
-                Raw climate signals (temperature, precipitation) are noisy on a year-to-year basis.
-                Before we can measure meaningful acceleration, we need to strip out short-lived
-                weather noise while preserving genuine multi-year trends. Gurjar & Camp's
-                Exponentially Weighted Moving Average (EWMA) does this by giving recent observations
-                more weight than older ones, with exponential decay controlled by a single
-                parameter α:
-            """)
-        )
-        st.latex(r"\lambda(t) = \alpha \cdot X(t) + (1 - \alpha) \cdot \lambda(t-1), \quad \alpha = 0.3")
-        st.markdown(
-            dedent("""\
-                *In plain terms:* each year's smoothed value is 30% "what actually happened this year"
-                and 70% "what the trend was before." This means a single anomalously hot year won't
-                fool the system into thinking a tipping point is near, but a *sustained* warming
-                trend will show through clearly. The choice of α = 0.3 gives a half-life of about
-                2 years — fast enough to detect real shifts, slow enough to ignore noise.
+Raw climate signals (temperature, precipitation) are noisy on a year-to-year basis.
+Before we can measure meaningful acceleration, we need to strip out short-lived
+weather noise while preserving genuine multi-year trends. Gurjar & Camp's
+Exponentially Weighted Moving Average (EWMA) does this by giving recent observations
+more weight than older ones, with exponential decay controlled by a single
+parameter $\alpha$:
 
-                ---
+$$\lambda(t) = \alpha \cdot X(t) + (1 - \alpha) \cdot \lambda(t-1), \quad \alpha = 0.3$$
 
-                **Step 2 — Standardized Momentum** (`src/tail_risk/momentum.py`)
+*In plain terms:* each year's smoothed value is 30% "what actually happened this year"
+and 70% "what the trend was before." This means a single anomalously hot year won't
+fool the system into thinking a tipping point is near, but a *sustained* warming
+trend will show through clearly. The choice of $\alpha = 0.3$ gives a half-life of about
+2 years — fast enough to detect real shifts, slow enough to ignore noise.
 
-                Once the signal is smoothed, we measure its *rate of change* — not in raw degrees,
-                but relative to how volatile the signal has been recently. This
-                "standardized momentum" is the key innovation from Gurjar & Camp:
-            """)
-        )
-        st.latex(r"m(t) = \frac{\lambda(t) - \lambda(t-1)}{\sigma_w(t) + \epsilon}")
-        st.markdown(
-            dedent("""\
-                where σ_w(t) is the rolling standard deviation over a local window of *w* = 7
-                timesteps, and ε = 10⁻⁸ prevents division by zero.
+---
 
-                *Why this matters:* a +0.5°C jump means something very different in the stable
-                tropics versus the volatile monsoon belt. By dividing the change by local
-                volatility, we get a dimensionless number that is directly comparable across
-                every grid cell on the map — a momentum of 2.0 in Bangkok means the same
-                "relative acceleration" as a momentum of 2.0 in Jakarta.
+**Step 2 — Standardized Momentum** (`src/tail_risk/momentum.py`)
 
-                ---
+Once the signal is smoothed, we measure its *rate of change* — not in raw degrees,
+but relative to how volatile the signal has been recently. This
+"standardized momentum" is the key innovation from Gurjar & Camp:
 
-                **Step 3 — Rolling Volatility of the Smoothed Signal** (`src/tail_risk/volatility.py`)
+$$m(t) = \frac{\lambda(t) - \lambda(t-1)}{\sigma_w(t) + \epsilon}$$
 
-                Volatility itself is a risk signal. We compute it as the rolling standard deviation
-                of the EWMA-smoothed series:
-            """)
-        )
-        st.latex(r"v(t) = \sqrt{\frac{1}{w}\sum_{i=t-w+1}^{t}\left[\lambda(i) - \bar{\lambda}_w\right]^2}")
-        st.markdown(
-            dedent("""\
-                *In plain terms:* this tells us how *stable* the trend itself is. A location whose
-                smoothed temperature is climbing steadily has low volatility. A location whose
-                smoothed temperature is lurching up and down has high volatility — and Gurjar & Camp
-                showed that rising volatility often *precedes* a regime shift, like tremors before an
-                earthquake.
+where $\sigma_w(t)$ is the rolling standard deviation over a local window of $w = 7$
+timesteps, and $\epsilon = 10^{-8}$ prevents division by zero.
 
-                ---
+*Why this matters:* a +0.5°C jump means something very different in the stable
+tropics versus the volatile monsoon belt. By dividing the change by local
+volatility, we get a dimensionless number that is directly comparable across
+every grid cell on the map — a momentum of 2.0 in Bangkok means the same
+"relative acceleration" as a momentum of 2.0 in Jakarta.
 
-                **Step 4 — Three-Regime Classification** (`src/tail_risk/engine.py`)
+---
 
-                The paper classifies every grid cell into one of three regimes based on where it
-                sits in the volatility–momentum plane:
+**Step 3 — Rolling Volatility of the Smoothed Signal** (`src/tail_risk/volatility.py`)
 
-                | Regime | Condition | Meaning |
-                |---|---|---|
-                | **Surge** (2) | vol > threshold **and** mom > threshold | Active crisis — both the trend and its instability are extreme |
-                | **Buildup** (1) | vol > threshold **or** mom > threshold | Pre-crisis — one signal is elevated, the other may follow |
-                | **Baseline** (0) | Neither elevated | Stable — no immediate concern |
+Volatility itself is a risk signal. We compute it as the rolling standard deviation
+of the EWMA-smoothed series:
 
-                The thresholds are set at the normalized 60th-percentile of volatility and the 65th-percentile
-                of momentum across the entire spatial grid, so the classification is always relative
-                to the current state of the map.
+$$v(t) = \sqrt{\frac{1}{w}\sum_{i=t-w+1}^{t}\left[\lambda(i) - \bar{\lambda}_w\right]^2}$$
 
-                *In plain terms:* think of "Baseline" as green, "Buildup" as yellow, and "Surge" as
-                red. A node enters Surge only when the warming is *fast* and *unstable* at the same
-                time — the worst-case combination for triggering cascading losses downstream.
-            """)
-        )
+*In plain terms:* this tells us how *stable* the trend itself is. A location whose
+smoothed temperature is climbing steadily has low volatility. A location whose
+smoothed temperature is lurching up and down has high volatility — and Gurjar & Camp
+showed that rising volatility often *precedes* a regime shift, like tremors before an
+earthquake.
+
+---
+
+**Step 4 — Three-Regime Classification** (`src/tail_risk/engine.py`)
+
+The paper classifies every grid cell into one of three regimes based on where it
+sits in the volatility-momentum plane:
+
+| Regime | Condition | Meaning |
+|---|---|---|
+| **Surge** (2) | vol > threshold **and** mom > threshold | Active crisis — both the trend and its instability are extreme |
+| **Buildup** (1) | vol > threshold **or** mom > threshold | Pre-crisis — one signal is elevated, the other may follow |
+| **Baseline** (0) | Neither elevated | Stable — no immediate concern |
+
+The thresholds are set at the normalized 60th-percentile of volatility and the 65th-percentile
+of momentum across the entire spatial grid, so the classification is always relative
+to the current state of the map.
+
+*In plain terms:* think of "Baseline" as green, "Buildup" as yellow, and "Surge" as
+red. A node enters Surge only when the warming is *fast* and *unstable* at the same
+time — the worst-case combination for triggering cascading losses downstream.
+        """))
 
     # ── Paper 2: Hawkes Process ─────────────────────────────────────
     st.markdown(
@@ -1627,51 +1620,45 @@ if active_section == "Overview":
     )
 
     with st.expander("Technical detail: the Hawkes intensity kernel and how it enters the composite score", expanded=False):
-        st.markdown(
-            dedent("""\
-                **The Hawkes Conditional Intensity**  (`src/tail_risk/engine.py → _hawkes_intensity()`)
+        st.markdown(dedent(r"""
+**The Hawkes Conditional Intensity**  (`src/tail_risk/engine.py`)
 
-                At each node, we track every timestep where the raw climate signal exceeded a high
-                threshold (the 90th-percentile of the first 25% of the time series — anchored to
-                an early baseline so the threshold doesn't drift upward with warming). Each
-                such exceedance is an "event." The Hawkes intensity at time *t* is:
-            """)
-        )
-        st.latex(r"\lambda^*(t) = \mu + \sum_{t_i < t} \beta \, e^{-\gamma (t - t_i)}")
-        st.markdown(
-            dedent("""\
-                | Symbol | Value | Meaning |
-                |---|---|---|
-                | μ | 0.1 | Background rate — the baseline probability of an extreme even with no recent history |
-                | β | 0.6 | Jump size — how much each past event raises the current intensity |
-                | γ | 0.8 | Decay rate — how quickly the memory of a past event fades (half-life ≈ 0.87 years) |
+At each node, we track every timestep where the raw climate signal exceeded a high
+threshold (the 90th-percentile of the first 25% of the time series — anchored to
+an early baseline so the threshold doesn't drift upward with warming). Each
+such exceedance is an "event." The Hawkes intensity at time $t$ is:
 
-                *In plain terms:* after an extreme year, the intensity jumps by 0.6 and then
-                decays back down exponentially. If *another* extreme hits before the first one has
-                decayed, the intensities stack — the system becomes self-exciting. Three consecutive
-                extreme years can push the Hawkes intensity well above 1.0, signaling a
-                self-reinforcing cluster.
+$$\lambda^*(t) = \mu + \sum_{t_i < t} \beta \, e^{-\gamma (t - t_i)}$$
 
-                ---
+| Symbol | Value | Meaning |
+|---|---|---|
+| $\mu$ | 0.1 | Background rate — the baseline probability of an extreme even with no recent history |
+| $\beta$ | 0.6 | Jump size — how much each past event raises the current intensity |
+| $\gamma$ | 0.8 | Decay rate — how quickly the memory of a past event fades (half-life of about 0.87 years) |
 
-                **How Hawkes enters the composite tail-risk score:**
+*In plain terms:* after an extreme year, the intensity jumps by 0.6 and then
+decays back down exponentially. If *another* extreme hits before the first one has
+decayed, the intensities stack — the system becomes self-exciting. Three consecutive
+extreme years can push the Hawkes intensity well above 1.0, signaling a
+self-reinforcing cluster.
 
-                The final per-node tail-risk score is a weighted blend of three components:
-            """)
-        )
-        st.latex(r"\text{Score} = 0.35 \times v_{norm} + 0.35 \times m_{norm} + 0.30 \times h_{norm}")
-        st.markdown(
-            dedent("""\
-                where *v*_norm is the normalized EWMA volatility, *m*_norm is the normalized
-                standardized momentum, and *h*_norm is the normalized Hawkes intensity.
-                All three are z-score standardized per Köppen-Geiger climate class (so a tropical
-                node is compared to other tropical nodes, not to polar ones), then rescaled to
-                [0, 1] via a global min-max pass.
+---
 
-                Nodes whose composite score exceeds the 95th-percentile across the entire spatial
-                grid are flagged as **tail-risk escalation zones** — the red markers on the map.
-            """)
-        )
+**How Hawkes enters the composite tail-risk score:**
+
+The final per-node tail-risk score is a weighted blend of three components:
+
+$$\text{Score} = 0.35 \times v_{norm} + 0.35 \times m_{norm} + 0.30 \times h_{norm}$$
+
+where $v_{norm}$ is the normalized EWMA volatility, $m_{norm}$ is the normalized
+standardized momentum, and $h_{norm}$ is the normalized Hawkes intensity.
+All three are z-score standardized per climate class (so a tropical
+node is compared to other tropical nodes, not to polar ones), then rescaled to
+$[0, 1]$ via a global min-max pass.
+
+Nodes whose composite score exceeds the 95th-percentile across the entire spatial
+grid are flagged as **tail-risk escalation zones** — the red markers on the map.
+        """))
 
     # ── Paper 3: Hess et al. 2023 ──────────────────────────────────
     st.markdown(
@@ -1697,72 +1684,67 @@ if active_section == "Overview":
     )
 
     with st.expander("Technical detail: the 4-stage downscaling pipeline and physical constraints", expanded=False):
-        st.markdown(
-            dedent("""\
-                **Stage 1 — Bicubic Upsampling** (`src/rendering/downscale.py → downscale_grid()`)
+        st.markdown(dedent(r"""
+**Stage 1 — Bicubic Upsampling** (`src/rendering/downscale.py`)
 
-                The coarse grid (e.g., 71 × 81 at 0.5° resolution) is upsampled by a configurable
-                scale factor (default 8×) using bicubic interpolation. This produces a smooth,
-                high-resolution field — like zooming into a low-res photo. The result is physically
-                plausible but lacks fine-scale texture.
+The coarse grid (e.g., 71 x 81 at 0.5 degree resolution) is upsampled by a configurable
+scale factor (default 8x) using bicubic interpolation. This produces a smooth,
+high-resolution field — like zooming into a low-res photo. The result is physically
+plausible but lacks fine-scale texture.
 
-                ---
+---
 
-                **Stage 2 — Gradient-Aware Stochastic Texture Injection** (Hess et al.'s key insight)
+**Stage 2 — Gradient-Aware Stochastic Texture Injection** (Hess et al.'s key insight)
 
-                Real climate fields are not smooth — they have local variations from topography,
-                land cover, and coastlines. Hess et al. showed that the *gradient magnitude* of the
-                coarse field tells you where local detail *should* vary most:
-            """)
-        )
-        st.latex(r"\text{texture}(x,y) = \mathcal{N}(0,\, \sigma_{base}) \times \left(1 + w_g \cdot |\nabla f(x,y)|\right)")
-        st.markdown(
-            dedent("""\
-                where σ_base = 0.02 controls the baseline texture amplitude, and *w*_g = 2.0
-                weights the gradient influence. In areas with strong spatial gradients (coastlines,
-                mountain edges), the noise is amplified; in flat interior regions, it stays subtle.
+Real climate fields are not smooth — they have local variations from topography,
+land cover, and coastlines. Hess et al. showed that the *gradient magnitude* of the
+coarse field tells you where local detail *should* vary most:
 
-                *In plain terms:* the system adds "realistic roughness" to the smooth upscaled
-                image, but only where the original coarse data suggests the terrain or climate
-                varies rapidly. A smooth ocean region stays smooth; a complex coastal boundary
-                gets more detail.
+$$\text{texture}(x,y) = \mathcal{N}(0, \sigma_{base}) \times \left(1 + w_g \cdot |\nabla f(x,y)|\right)$$
 
-                ---
+where $\sigma_{base} = 0.02$ controls the baseline texture amplitude, and $w_g = 2.0$
+weights the gradient influence. In areas with strong spatial gradients (coastlines,
+mountain edges), the noise is amplified; in flat interior regions, it stays subtle.
 
-                **Stage 3 — Multi-Scale Gaussian Smoothing**
+*In plain terms:* the system adds "realistic roughness" to the smooth upscaled
+image, but only where the original coarse data suggests the terrain or climate
+varies rapidly. A smooth ocean region stays smooth; a complex coastal boundary
+gets more detail.
 
-                The stochastic texture can occasionally produce implausibly sharp features. A
-                two-pass Gaussian filter (σ₁ = 1.0 at fine scale, σ₂ = 0.5 at coarser scale)
-                blends the texture into the underlying field, preventing artifacts while preserving
-                the spatial structure that Stage 2 introduced.
+---
 
-                ---
+**Stage 3 — Multi-Scale Gaussian Smoothing**
 
-                **Stage 4 — Local Contrast Enhancement**
+The stochastic texture can occasionally produce implausibly sharp features. A
+two-pass Gaussian filter blends the texture into the underlying field, preventing
+artifacts while preserving the spatial structure that Stage 2 introduced.
 
-                A 15×15-pixel local mean is computed, and the deviation of each pixel from this
-                local mean is amplified by a factor of 1.3×. This increases the visual contrast of
-                real climate features (warm cores, cool coastal upwelling zones) without altering the
-                global statistics of the field.
+---
 
-                ---
+**Stage 4 — Local Contrast Enhancement**
 
-                **Physical Constraint Enforcement** (`apply_physical_constraints()`)
+A 15x15-pixel local mean is computed, and the deviation of each pixel from this
+local mean is amplified by a factor of 1.3x. This increases the visual contrast of
+real climate features (warm cores, cool coastal upwelling zones) without altering the
+global statistics of the field.
 
-                Following Hess et al., every downscaled field is post-processed to enforce hard
-                physical bounds:
+---
 
-                | Variable | Constraint | Reason |
-                |---|---|---|
-                | Precipitation | ≥ 0 mm/day | Rain cannot be negative |
-                | Temperature | −60°C to +60°C | Physically observed bounds on Earth |
-                | Risk scores | 0.0 to 1.0 | Normalized probability scale |
+**Physical Constraint Enforcement** (`apply_physical_constraints()`)
 
-                This guarantees that the stochastic texture injection never produces values that
-                violate basic physics — a critical requirement Hess et al. emphasize for
-                trustworthy downscaling.
-            """)
-        )
+Following Hess et al., every downscaled field is post-processed to enforce hard
+physical bounds:
+
+| Variable | Constraint | Reason |
+|---|---|---|
+| Precipitation | >= 0 mm/day | Rain cannot be negative |
+| Temperature | -60 to +60 C | Physically observed bounds on Earth |
+| Risk scores | 0.0 to 1.0 | Normalized probability scale |
+
+This guarantees that the stochastic texture injection never produces values that
+violate basic physics — a critical requirement Hess et al. emphasize for
+trustworthy downscaling.
+        """))
 
     # ── Paper 4: Ito et al. 2020 ───────────────────────────────────
     st.markdown(
@@ -1787,79 +1769,68 @@ if active_section == "Overview":
     )
 
     with st.expander("Technical detail: FRA computation, multi-source uncertainty, and Taylor Skill Score", expanded=False):
-        st.markdown(
-            dedent("""\
-                **The Fractional Range Analysis (FRA)** (`src/simulation/roi.py → _compute_fra()`)
+        st.markdown(dedent(r"""
+**The Fractional Range Analysis (FRA)** (`src/simulation/roi.py`)
 
-                FRA measures what fraction of the true range of outcomes a given model subset
-                captures:
-            """)
-        )
-        st.latex(r"FRA = \frac{R_{subset}}{R_{full}}")
-        st.markdown(
-            dedent("""\
-                where *R*_subset is the range (max − min) of risk predictions from the model subset,
-                and *R*_full is the range from the complete ensemble. Ito et al. found that for
-                precipitation-driven impacts, FRA ≈ 0.6 — meaning ISIMIP models span only about
-                60% of the true uncertainty range.
+FRA measures what fraction of the true range of outcomes a given model subset captures:
 
-                *In plain terms:* if you only listen to ISIMIP models, you think the future is
-                more predictable than it actually is. FRA tells us the correction factor: we
-                should widen our error bars by roughly 1/0.6 ≈ 1.67×.
+$$FRA = \frac{R_{subset}}{R_{full}}$$
 
-                In SenTree, since we typically use a single model run (GFDL-ESM4 SSP3-7.0), we
-                approximate an "ensemble" by splitting the temporal series into chunks and
-                treating each chunk as a pseudo-member. The resulting FRA is then used to
-                inflate precipitation uncertainty.
+where $R_{subset}$ is the range (max - min) of risk predictions from the model subset,
+and $R_{full}$ is the range from the complete ensemble. Ito et al. found that for
+precipitation-driven impacts, FRA is approximately 0.6 — meaning ISIMIP models span only about
+60% of the true uncertainty range.
 
-                ---
+*In plain terms:* if you only listen to ISIMIP models, you think the future is
+more predictable than it actually is. FRA tells us the correction factor: we
+should widen our error bars by roughly 1/0.6 = 1.67x.
 
-                **Multi-Source Uncertainty Decomposition** (`src/simulation/roi.py → compute_roi()`)
+In SenTree, since we typically use a single model run (GFDL-ESM4 SSP3-7.0), we
+approximate an "ensemble" by splitting the temporal series into chunks and
+treating each chunk as a pseudo-member. The resulting FRA is then used to
+inflate precipitation uncertainty.
 
-                Following Ito et al.'s framework, SenTree decomposes total prediction uncertainty
-                into three independent sources, combined in quadrature:
-            """)
-        )
-        st.latex(r"U_{total} = \sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}")
-        st.markdown(
-            dedent("""\
-                Each component is computed differently:
+---
 
-                | Source | How we estimate it | Typical value |
-                |---|---|---|
-                | **U_precip** | Coefficient of variation of precipitation × FRA correction (1/0.6) | ~0.39 |
-                | **U_model** | Spatial CV of risk reduction across all nodes — captures how unevenly the intervention works across the map | ~0.10 – 0.52 |
-                | **U_scenario** | Empirical SSP pathway spread: 0.15 × 1/√n_members — reflects how different emission scenarios diverge | ~0.07 |
+**Multi-Source Uncertainty Decomposition** (`src/simulation/roi.py`)
 
-                The ROI confidence interval is then:
-            """)
-        )
-        st.latex(r"ROI_{bounds} = ROI \times (1 \pm U_{total})")
-        st.markdown(
-            dedent("""\
-                *In plain terms:* if U_total = 0.40, the true ROI could be 40% higher or
-                40% lower than the point estimate. This is the honest range an investment
-                committee should consider. Without the FRA correction, the range would look
-                misleadingly tight.
+Following Ito et al.'s framework, SenTree decomposes total prediction uncertainty
+into three independent sources, combined in quadrature:
 
-                ---
+$$U_{total} = \sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}$$
 
-                **Taylor Skill Score** (`src/simulation/roi.py → compute_taylor_skill_score()`)
+Each component is computed differently:
 
-                As a secondary diagnostic, we implement the Taylor (2001) skill score used by
-                Ito et al. to compare model skill:
-            """)
-        )
-        st.latex(r"S = \frac{4(1+R)}{(\hat{\sigma} + \hat{\sigma}^{-1})^2 \cdot (1+R_0)}")
-        st.markdown(
-            dedent("""\
-                where *R* is the pattern correlation between the model and a reference field,
-                σ̂ is the ratio of standard deviations, and *R*₀ is the maximum achievable
-                correlation. A score of 1.0 means perfect agreement; lower scores indicate the
-                model is missing spatial patterns or has incorrect variance — both of which
-                translate to investment risk.
-            """)
-        )
+| Source | How we estimate it | Typical value |
+|---|---|---|
+| **U\_precip** | Coefficient of variation of precipitation x FRA correction (1/0.6) | ~0.39 |
+| **U\_model** | Spatial CV of risk reduction across all nodes — how unevenly the intervention works across the map | ~0.10 - 0.52 |
+| **U\_scenario** | Empirical SSP pathway spread — reflects how different emission scenarios diverge | ~0.07 |
+
+The ROI confidence interval is then:
+
+$$ROI_{bounds} = ROI \times (1 \pm U_{total})$$
+
+*In plain terms:* if $U_{total} = 0.40$, the true ROI could be 40% higher or
+40% lower than the point estimate. This is the honest range an investment
+committee should consider. Without the FRA correction, the range would look
+misleadingly tight.
+
+---
+
+**Taylor Skill Score** (`src/simulation/roi.py`)
+
+As a secondary diagnostic, we implement the Taylor (2001) skill score used by
+Ito et al. to compare model skill:
+
+$$S = \frac{4(1+R)}{(\hat{\sigma} + \hat{\sigma}^{-1})^2 \cdot (1+R_0)}$$
+
+where $R$ is the pattern correlation between the model and a reference field,
+$\hat{\sigma}$ is the ratio of standard deviations, and $R_0$ is the maximum achievable
+correlation. A score of 1.0 means perfect agreement; lower scores indicate the
+model is missing spatial patterns or has incorrect variance — both of which
+translate to investment risk.
+        """))
 
     # ── How the papers connect ──────────────────────────────────────
     st.markdown(
@@ -2284,7 +2255,7 @@ elif active_section == "Evidence":
                             }
                         )
 
-                    max_points = 50_000
+                    max_points = 12_000
                     if len(df_pts) > max_points:
                         df_pts = df_pts.sample(max_points, random_state=0)
                     lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
@@ -2340,39 +2311,61 @@ elif active_section == "Model":
             "View the dedicated React playback UI directly inside Streamlit, with a Streamlit-native fallback for quick checks.",
         )
 
+        # Detect which playback options are available
+        _react_dist = Path(ROOT_DIR) / "apps" / "gnn-playback" / "dist"
+        _react_available = _react_dist.exists() and (_react_dist / "index.html").exists()
+
+        _playback_options = []
+        if _react_available:
+            _playback_options.append("Embedded React app")
+        _playback_options.append("Streamlit playback")
+
         playback_mode = st.radio(
             "Playback UI",
-            ["Embedded React app", "Streamlit fallback"],
+            _playback_options,
             index=0,
             horizontal=True,
             label_visibility="collapsed",
             key="sentree_playback_mode",
         )
 
-        if playback_mode == "Embedded React app":
+        if playback_mode == "Embedded React app" and _react_available:
             import streamlit.components.v1 as components
 
-            # Serve the pre-built React app from apps/gnn-playback/dist/
-            # This works on Streamlit Cloud (no Vite server needed) and locally.
-            _react_dist = Path(ROOT_DIR) / "apps" / "gnn-playback" / "dist"
-            if _react_dist.exists() and (_react_dist / "index.html").exists():
-                _playback_component = components.declare_component(
-                    "gnn_playback", path=str(_react_dist)
-                )
-                _playback_component(key="gnn_playback_embed", default=0, height=920)
-            else:
-                # Fallback: iframe to a running dev server (local dev only)
-                default_url = os.environ.get("SENTREE_GNN_PLAYBACK_URL", "http://localhost:4173/").strip()
-                playback_url = st.text_input(
-                    "React app URL",
-                    value=default_url,
-                    help=(
-                        "The pre-built React app was not found at apps/gnn-playback/dist/. "
-                        "Build it with: cd apps/gnn-playback && npm run build"
-                    ),
-                    key="sentree_gnn_playback_url",
-                )
-                components.iframe(playback_url, height=920, scrolling=True)
+            # Inline the built React app as a self-contained HTML blob.
+            # declare_component won't work here — it requires Streamlit's
+            # custom component protocol.  components.html() just serves raw HTML.
+            @st.cache_data
+            def _build_react_html():
+                idx_html = (_react_dist / "index.html").read_text(encoding="utf-8")
+                # Inline CSS
+                for css_file in (_react_dist / "assets").glob("*.css"):
+                    tag = f'<link rel="stylesheet" crossorigin href="./assets/{css_file.name}">'
+                    if tag not in idx_html:
+                        # Try alternate tag format
+                        tag = f'<link rel="stylesheet" href="./assets/{css_file.name}">'
+                    style_content = css_file.read_text(encoding="utf-8")
+                    idx_html = idx_html.replace(tag, f"<style>{style_content}</style>")
+                # Inline JS
+                for js_file in (_react_dist / "assets").glob("*.js"):
+                    tag = f'<script type="module" crossorigin src="./assets/{js_file.name}"></script>'
+                    if tag not in idx_html:
+                        tag = f'<script type="module" src="./assets/{js_file.name}"></script>'
+                    js_content = js_file.read_text(encoding="utf-8")
+                    idx_html = idx_html.replace(tag, f"<script type=\"module\">{js_content}</script>")
+                # Embed training data JSON directly to avoid fetch() issues
+                data_json_path = _react_dist / "data" / "gnn_training_history.json"
+                if data_json_path.exists():
+                    inject = (
+                        '<script>window.__SENTREE_PLAYBACK_DATA__ = '
+                        + data_json_path.read_text(encoding="utf-8")
+                        + ';</script>'
+                    )
+                    idx_html = idx_html.replace('<div id="root">', inject + '<div id="root">')
+                return idx_html
+
+            react_html = _build_react_html()
+            components.html(react_html, height=960, scrolling=True)
         else:
             training = load_training_history()
             if training is None:

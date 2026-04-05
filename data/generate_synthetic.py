@@ -33,6 +33,9 @@ import numpy as np
 import pickle
 from scipy.ndimage import gaussian_filter
 
+from src.data.koppen_geiger import KG_LABELS, classify_grid
+from src.simulation.interventions import INTERVENTIONS
+
 
 LAPSE_RATE = 6.5 / 1000.0   # °C per metre
 
@@ -139,6 +142,248 @@ def _build_coastal_factor(land_mask):
 def _gaussian_random_field(shape, rng, corr_length=5.0):
     """Spatially correlated noise — avoids white-noise texture."""
     return gaussian_filter(rng.standard_normal(shape), sigma=corr_length)
+
+
+# ============================================================
+# Intervention-aware proxy builders
+# ============================================================
+
+def _normalize_field(field, *, lower=5.0, upper=95.0):
+    """Robustly scale a field into [0, 1] using percentile clipping."""
+    field = np.asarray(field, dtype=np.float32)
+    lo = float(np.percentile(field, lower))
+    hi = float(np.percentile(field, upper))
+    if hi - lo < 1e-8:
+        return np.zeros_like(field, dtype=np.float32)
+    return np.clip((field - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
+def _distance_to_segment(lat_grid, lon_grid, lat0, lon0, lat1, lon1):
+    """Approximate planar distance from each grid cell to a line segment."""
+    x = lon_grid.astype(np.float64)
+    y = lat_grid.astype(np.float64)
+    x0, y0 = float(lon0), float(lat0)
+    x1, y1 = float(lon1), float(lat1)
+    dx = x1 - x0
+    dy = y1 - y0
+    denom = dx * dx + dy * dy
+    if denom < 1e-8:
+        return np.sqrt((x - x0) ** 2 + (y - y0) ** 2)
+    t = ((x - x0) * dx + (y - y0) * dy) / denom
+    t = np.clip(t, 0.0, 1.0)
+    proj_x = x0 + t * dx
+    proj_y = y0 + t * dy
+    return np.sqrt((x - proj_x) ** 2 + (y - proj_y) ** 2)
+
+
+def _build_hydrology_factor(lat_grid, lon_grid, land_mask):
+    """Approximate major river and floodplain corridors across SE Asia."""
+    rivers = [
+        ((21.5, 101.0), (9.5, 105.8), 1.1),
+        ((19.5, 99.0), (13.2, 100.4), 0.8),
+        ((24.0, 96.0), (16.8, 95.2), 1.0),
+        ((23.2, 104.0), (20.5, 106.3), 0.7),
+        ((1.0, 111.5), (0.0, 109.3), 0.6),
+        ((18.0, 121.0), (17.5, 121.7), 0.4),
+    ]
+    field = np.zeros_like(lat_grid, dtype=np.float32)
+    for (lat0, lon0), (lat1, lon1), weight in rivers:
+        dist = _distance_to_segment(lat_grid, lon_grid, lat0, lon0, lat1, lon1)
+        field += weight * np.exp(-(dist / 1.35) ** 2)
+    return np.clip(field * land_mask, 0.0, 1.0).astype(np.float32)
+
+
+def _build_city_factor(lat_grid, lon_grid, cities):
+    """Continuous urban influence surface derived from city anchors."""
+    field = np.zeros_like(lat_grid, dtype=np.float32)
+    for clat, clon, cgdp in cities:
+        dist = np.sqrt((lat_grid - clat) ** 2 + (lon_grid - clon) ** 2)
+        field += (cgdp / 65000.0) * np.exp(-dist ** 2 / 5.0)
+    return _normalize_field(field, lower=2.0, upper=98.0)
+
+
+def _kg_mask_from_rules(kg_labels, deltas):
+    """Apply KG allow/block semantics to a string label grid."""
+    allow_codes = set(deltas.get("kg_allow_codes", []))
+    allow_prefixes = tuple(deltas.get("kg_allow_prefixes", []))
+    block_codes = set(deltas.get("kg_block_codes", []))
+    block_prefixes = tuple(deltas.get("kg_block_prefixes", []))
+
+    mask = np.ones(kg_labels.shape, dtype=bool)
+    if allow_codes or allow_prefixes:
+        mask &= np.vectorize(
+            lambda code: bool((code in allow_codes) or (allow_prefixes and str(code).startswith(allow_prefixes))),
+            otypes=[bool],
+        )(kg_labels)
+    if block_codes or block_prefixes:
+        mask &= np.vectorize(
+            lambda code: bool((code not in block_codes) and not (block_prefixes and str(code).startswith(block_prefixes))),
+            otypes=[bool],
+        )(kg_labels)
+    return mask
+
+
+def _build_intervention_proxies(
+    *,
+    tas,
+    pr,
+    soil_series,
+    land_mask,
+    coastal_factor,
+    elevation,
+    city_factor,
+    hydrology_factor,
+):
+    """Create environmental proxy layers that make the intervention catalog meaningful."""
+    tas_recent = np.mean(tas[-10:], axis=0)
+    pr_recent = np.mean(pr[-10:], axis=0)
+    soil_recent = np.mean(soil_series[-10:], axis=0)
+
+    slope = np.hypot(*np.gradient(elevation.astype(np.float32)))
+    slope_factor = _normalize_field(slope)
+    lowland_factor = np.clip(1.0 - elevation / 1200.0, 0.0, 1.0).astype(np.float32) * land_mask
+    upland_factor = np.clip(elevation / 1800.0, 0.0, 1.0).astype(np.float32) * land_mask
+    warm_factor = _normalize_field(tas_recent)
+    humid_factor = _normalize_field(pr_recent)
+    dry_factor = np.clip((1.0 - humid_factor) * 0.55 + (1.0 - soil_recent) * 0.45, 0.0, 1.0).astype(np.float32)
+    floodplain_factor = np.clip(lowland_factor * (0.55 * hydrology_factor + 0.45 * humid_factor), 0.0, 1.0).astype(np.float32)
+    wetland_factor = np.clip(lowland_factor * (0.5 * soil_recent + 0.3 * humid_factor + 0.2 * hydrology_factor), 0.0, 1.0).astype(np.float32)
+    peat_factor = np.clip(wetland_factor * (0.6 * lowland_factor + 0.4 * coastal_factor), 0.0, 1.0).astype(np.float32)
+    cropland_factor = np.clip(land_mask * (0.5 * lowland_factor + 0.25 * city_factor + 0.25 * (1.0 - slope_factor)), 0.0, 1.0).astype(np.float32)
+    forest_restoration_factor = np.clip(land_mask * (0.5 * humid_factor + 0.3 * upland_factor + 0.2 * (1.0 - city_factor)), 0.0, 1.0).astype(np.float32)
+    delta_factor = np.clip(lowland_factor * coastal_factor * (0.6 * humid_factor + 0.4 * hydrology_factor), 0.0, 1.0).astype(np.float32)
+    reef_factor = np.clip((1.0 - land_mask) * coastal_factor * warm_factor, 0.0, 1.0).astype(np.float32)
+    exposed_coast_factor = np.clip(coastal_factor * (0.55 * warm_factor + 0.45 * humid_factor), 0.0, 1.0).astype(np.float32)
+    dune_factor = np.clip(land_mask * coastal_factor * dry_factor, 0.0, 1.0).astype(np.float32)
+    groundwater_stress_factor = np.clip(land_mask * (0.6 * dry_factor + 0.4 * (1.0 - hydrology_factor)), 0.0, 1.0).astype(np.float32)
+    fire_risk_factor = np.clip(land_mask * (0.55 * dry_factor + 0.25 * warm_factor + 0.2 * (1.0 - soil_recent)), 0.0, 1.0).astype(np.float32)
+    heat_urban_factor = np.clip(city_factor * (0.6 * warm_factor + 0.4 * land_mask), 0.0, 1.0).astype(np.float32)
+    salinity_factor = np.clip(delta_factor * (0.5 * dry_factor + 0.5 * cropland_factor), 0.0, 1.0).astype(np.float32)
+    erosion_factor = np.clip(land_mask * (0.55 * slope_factor + 0.45 * humid_factor), 0.0, 1.0).astype(np.float32)
+
+    return {
+        "city_factor": city_factor.astype(np.float32),
+        "hydrology_factor": hydrology_factor.astype(np.float32),
+        "slope_factor": slope_factor,
+        "lowland_factor": lowland_factor,
+        "upland_factor": upland_factor,
+        "warm_factor": warm_factor,
+        "humid_factor": humid_factor,
+        "dry_factor": dry_factor,
+        "floodplain_factor": floodplain_factor,
+        "wetland_factor": wetland_factor,
+        "peat_factor": peat_factor,
+        "cropland_factor": cropland_factor,
+        "forest_restoration_factor": forest_restoration_factor,
+        "delta_factor": delta_factor,
+        "reef_factor": reef_factor,
+        "exposed_coast_factor": exposed_coast_factor,
+        "dune_factor": dune_factor,
+        "groundwater_stress_factor": groundwater_stress_factor,
+        "fire_risk_factor": fire_risk_factor,
+        "heat_urban_factor": heat_urban_factor,
+        "salinity_factor": salinity_factor,
+        "erosion_factor": erosion_factor,
+        "soil_recent": soil_recent.astype(np.float32),
+    }
+
+
+def _base_suitability_for_category(category, proxies, land_mask):
+    if category == "coastal_nature":
+        return np.maximum(proxies["delta_factor"], proxies["reef_factor"])
+    if category == "coastal_defense":
+        return np.maximum(proxies["exposed_coast_factor"], proxies["dune_factor"])
+    if category == "agriculture":
+        return proxies["cropland_factor"]
+    if category == "water_management":
+        return np.maximum(proxies["hydrology_factor"], proxies["groundwater_stress_factor"])
+    if category == "urban_heat":
+        return proxies["heat_urban_factor"]
+    if category == "urban_water":
+        return np.maximum(proxies["heat_urban_factor"], proxies["floodplain_factor"])
+    if category == "wetlands":
+        return np.maximum(proxies["wetland_factor"], proxies["peat_factor"])
+    if category == "forestry":
+        return proxies["forest_restoration_factor"]
+    if category == "flood_management":
+        return proxies["floodplain_factor"]
+    if category == "land_management":
+        return np.maximum(proxies["erosion_factor"], proxies["upland_factor"])
+    if category == "fire_management":
+        return proxies["fire_risk_factor"]
+    if category == "preparedness":
+        return np.clip(0.35 + 0.65 * land_mask, 0.0, 1.0).astype(np.float32)
+    return land_mask.astype(np.float32)
+
+
+def _intervention_signal(key, category, proxies, land_mask):
+    base = _base_suitability_for_category(category, proxies, land_mask)
+    if key == "mangrove_restoration":
+        return proxies["delta_factor"]
+    if key == "regenerative_agriculture":
+        return np.clip(proxies["cropland_factor"] * (0.55 + 0.45 * proxies["soil_recent"]), 0.0, 1.0)
+    if key == "drip_irrigation":
+        return np.clip(proxies["cropland_factor"] * proxies["groundwater_stress_factor"], 0.0, 1.0)
+    if key == "agroforestry_belts":
+        return np.clip(proxies["cropland_factor"] * (0.5 + 0.5 * proxies["humid_factor"]), 0.0, 1.0)
+    if key == "peatland_rewetting":
+        return proxies["peat_factor"]
+    if key in {"cool_roofs", "cool_pavements", "shade_tree_corridors"}:
+        return proxies["heat_urban_factor"]
+    if key in {"floodplain_reconnection", "wetland_restoration", "riparian_buffers"}:
+        return np.clip(proxies["floodplain_factor"] * (0.6 + 0.4 * proxies["hydrology_factor"]), 0.0, 1.0)
+    if key == "coral_reef_restoration":
+        return proxies["reef_factor"]
+    if key == "dune_restoration":
+        return proxies["dune_factor"]
+    if key == "watershed_reforestation":
+        return np.clip(proxies["forest_restoration_factor"] * (0.5 + 0.5 * proxies["upland_factor"]), 0.0, 1.0)
+    if key == "rainwater_harvesting":
+        return np.clip(proxies["cropland_factor"] * proxies["groundwater_stress_factor"], 0.0, 1.0)
+    if key == "drought_resistant_crops":
+        return np.clip(proxies["cropland_factor"] * (0.6 * proxies["dry_factor"] + 0.4 * proxies["warm_factor"]), 0.0, 1.0)
+    if key == "saline_soil_rehabilitation":
+        return np.clip(proxies["salinity_factor"] * proxies["cropland_factor"], 0.0, 1.0)
+    if key == "check_dams":
+        return np.clip(proxies["hydrology_factor"] * proxies["erosion_factor"], 0.0, 1.0)
+    if key == "early_warning_systems":
+        return np.clip(0.45 + 0.55 * land_mask, 0.0, 1.0).astype(np.float32)
+    if key == "slope_stabilization":
+        return np.clip(proxies["erosion_factor"] * proxies["upland_factor"], 0.0, 1.0)
+    if key == "green_stormwater_networks":
+        return np.clip(proxies["heat_urban_factor"] * (0.5 + 0.5 * proxies["floodplain_factor"]), 0.0, 1.0)
+    if key == "managed_aquifer_recharge":
+        return np.clip(proxies["groundwater_stress_factor"] * (0.5 + 0.5 * proxies["hydrology_factor"]), 0.0, 1.0)
+    if key == "seagrass_restoration":
+        return np.clip(0.65 * proxies["reef_factor"] + 0.35 * proxies["delta_factor"] * (1.0 - land_mask), 0.0, 1.0)
+    if key == "firebreak_landscaping":
+        return np.clip(proxies["fire_risk_factor"] * (0.5 + 0.5 * proxies["forest_restoration_factor"]), 0.0, 1.0)
+    if key == "living_breakwaters":
+        return proxies["exposed_coast_factor"]
+    if key == "permeable_surfaces":
+        return np.clip(proxies["heat_urban_factor"] * (0.55 + 0.45 * proxies["floodplain_factor"]), 0.0, 1.0)
+    return base
+
+
+def _build_intervention_suitability(
+    *,
+    tas_monthly,
+    pr_monthly,
+    land_mask,
+    intervention_proxies,
+):
+    """Create intervention suitability maps tied to KG classes and domain proxies."""
+    kg_codes = classify_grid(tas_monthly, pr_monthly, is_kelvin=False, is_daily_flux=True).astype(np.int32)
+    kg_labels_last = np.vectorize(lambda code: KG_LABELS.get(int(code), "Unknown"), otypes=[object])(kg_codes[-1])
+
+    suitability = {}
+    for key, intervention in INTERVENTIONS.items():
+        deltas = intervention["deltas"]
+        kg_mask = _kg_mask_from_rules(kg_labels_last, deltas).astype(np.float32)
+        signal = _intervention_signal(key, intervention.get("category", "general"), intervention_proxies, land_mask)
+        suitability[key] = np.clip(signal * kg_mask, 0.0, 1.0).astype(np.float32)
+
+    return kg_codes, suitability
 
 
 # ============================================================
@@ -331,11 +576,13 @@ def generate_synthetic_data(out_dir='data/processed'):
         (11.6, 104.9, 15000), (17.9, 102.6, 14000), (15.0,  99.9, 16000),
         ( 1.5, 110.3, 20000), ( 5.4, 100.3, 28000),
     ]
+    city_factor = _build_city_factor(lat_grid, lon_grid, cities)
+    hydrology_factor = _build_hydrology_factor(lat_grid, lon_grid, land_mask)
     for clat, clon, cgdp in cities:
         dist = np.sqrt((lat_grid - clat)**2 + (lon_grid - clon)**2)
         gdp_base += cgdp * np.exp(-dist**2 / 6)
     gdp = np.clip(
-        gdp_base * (1 + 0.6 * coastal_factor + 0.3 * land_mask),
+        gdp_base * (1 + 0.6 * coastal_factor + 0.3 * land_mask + 0.35 * city_factor),
         1000, 85000
     ).astype(np.float32)
     print(f"  GDP: ${gdp.min():.0f} to ${gdp.max():.0f} per capita")
@@ -346,10 +593,37 @@ def generate_synthetic_data(out_dir='data/processed'):
         dist = np.sqrt((lat_grid - clat)**2 + (lon_grid - clon)**2)
         pop_base += (cgdp / 8) * np.exp(-dist**2 / 4)
     pop = np.clip(
-        pop_base * (1 + 1.2 * coastal_factor) * land_mask,
+        pop_base * (1 + 1.2 * coastal_factor + 0.45 * city_factor) * land_mask,
         0, 18000
     ).astype(np.float32)
     print(f"  Population: {pop.min():.0f} to {pop.max():.0f} per km²")
+
+    # ---- Intervention-aware suitability layers ----
+    print("  Building intervention suitability priors...")
+    intervention_proxies = _build_intervention_proxies(
+        tas=tas,
+        pr=pr,
+        soil_series=soil_series,
+        land_mask=land_mask,
+        coastal_factor=coastal_factor,
+        elevation=elevation,
+        city_factor=city_factor,
+        hydrology_factor=hydrology_factor,
+    )
+    kg_codes, intervention_suitability = _build_intervention_suitability(
+        tas_monthly=tas_monthly,
+        pr_monthly=pr_monthly,
+        land_mask=land_mask,
+        intervention_proxies=intervention_proxies,
+    )
+    ranked = sorted(
+        ((key, float(np.mean(value > 0.45))) for key, value in intervention_suitability.items()),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:5]
+    print("  Top intervention footprints (>0.45 suitability):")
+    for key, share in ranked:
+        print(f"    {key}: {share:.1%}")
 
     # ---- Summary ----
     print(f"\n  ENSO: std={enso.std():.3f}, range=[{enso.min():.2f},{enso.max():.2f}]")
@@ -370,6 +644,11 @@ def generate_synthetic_data(out_dir='data/processed'):
         'coastal_factor':       coastal_factor,
         'land_mask':            land_mask,
         'elevation':            elevation,
+        'city_factor':          city_factor,
+        'hydrology_factor':     hydrology_factor,
+        'kg_codes':             kg_codes,
+        'intervention_proxies': intervention_proxies,
+        'intervention_suitability': intervention_suitability,
         'lats':                 lats,
         'lons':                 lons,
         'years':                years,

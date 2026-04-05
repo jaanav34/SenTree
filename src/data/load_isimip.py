@@ -56,9 +56,12 @@ def load_climate_data(
         # Pipeline now expects monthly grids (for Köppen-Geiger stabilization). Older caches
         # may not include these keys, so invalidate and rebuild automatically.
         if isinstance(data, dict) and ("tas_monthly" in data) and ("pr_monthly" in data):
-            print(f"  Loaded cached data from {pkl_path}")
-            return data
-        print(f"  NOTE: cache missing monthly keys; rebuilding: {pkl_path}")
+            if ("land_mask" in data) and ("intervention_suitability" not in data):
+                print(f"  NOTE: synthetic cache missing intervention suitability; rebuilding: {pkl_path}")
+            else:
+                print(f"  Loaded cached data from {pkl_path}")
+                return data
+        print(f"  NOTE: cache is stale or missing required fields; rebuilding: {pkl_path}")
 
     # Try to find ISIMIP NetCDF files (tas required; pr optional)
     chosen_raw = None

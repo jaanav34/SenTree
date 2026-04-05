@@ -161,6 +161,24 @@ This stores embeddings in `outputs/embeddings` using ChromaDB.
 .venv/bin/python -m streamlit run src/dashboard/app.py
 ```
 
+Or use the launcher:
+
+```bash
+./scripts/run_dashboard.sh
+```
+
+### 6. Launch the React GNN playback app
+
+```bash
+./scripts/run_gnn_playback.sh
+```
+
+This script:
+
+- exports `outputs/roi/gnn_training_history.npz` into the React app's `public/data` folder
+- installs frontend dependencies on first run
+- starts the Vite development server on `http://127.0.0.1:4173`
+
 ## Inputs and Data Sources
 
 SenTree supports two data modes:

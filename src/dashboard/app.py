@@ -451,10 +451,10 @@ with st.sidebar:
     intervention = st.selectbox('Intervention', ['Coastal Mangrove Restoration', 'Regenerative Agriculture', 'Both'])
     capital_allocation = st.slider(
         "Total Capital Allocation (USD)",
-        min_value=10_000_000,
-        max_value=500_000_000,
-        value=100_000_000,
-        step=10_000_000,
+        min_value=5_000_000,
+        max_value=100_000_000,
+        value=50_000_000,
+        step=5_000_000,
         format="$%d",
         help="Investor-mode sensitivity: adjust capital to see ROI and loss avoided update with a diminishing-returns assumption.",
     )
@@ -530,6 +530,18 @@ def load_opportunity_map():
 
 
 roi_data = load_roi_data()
+
+
+def _format_money_short(value):
+    value = float(value)
+    abs_val = abs(value)
+    if abs_val >= 1e9:
+        return f"${value/1e9:.2f}B"
+    if abs_val >= 1e6:
+        return f"${value/1e6:.1f}M"
+    if abs_val >= 1e3:
+        return f"${value/1e3:.1f}K"
+    return f"${value:,.0f}"
 
 
 def _apply_capital_allocation(roi_data, capital_allocation):
@@ -984,6 +996,19 @@ training_history_path = "outputs/roi/gnn_training_history.npz"
 training_status = "Training snapshots ready" if os.path.exists(training_history_path) else "Run pipeline to generate playback"
 video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
 
+def _confidence_proxy(entry):
+    u_precip = float(entry.get("u_precip", 0.0))
+    u_model = float(entry.get("u_model", 0.0))
+    u_scenario = float(entry.get("u_scenario", 0.0))
+    total_u = min(u_precip + u_model + u_scenario, 0.95)
+    return max(0.55, 1.0 - total_u)
+
+summary_conf = _confidence_proxy(top_intervention)
+summary_tail = int(top_intervention.get("tail_risk_nodes_neutralized", 0))
+summary_name = top_intervention.get("name", "the selected intervention")
+summary_roi = float(top_intervention.get("roi", 0.0))
+summary_loss = _format_money_short(top_intervention.get("total_loss_avoided", 0.0))
+
 st.markdown(
     f"""
     <div class="sentree-hero">
@@ -1005,11 +1030,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    f"**AI Resilience Summary:** Our GNN has flagged {summary_tail} tail-risk nodes in the SE Asia coastal corridor. "
+    f"By allocating {_format_money_short(capital_allocation)} toward {summary_name}, the fund can avoid about "
+    f"{summary_loss} in projected GDP losses by 2045. That represents a {summary_roi:.2f}x Resilience ROI with "
+    f"{summary_conf*100:.0f}% confidence (proxy based on model uncertainty)."
+)
+
 hero_cols = st.columns(4)
 with hero_cols[0]:
     kpi_card("Best ROI", f"{top_intervention.get('roi', 0):.2f}x", top_intervention["name"])
 with hero_cols[1]:
-    kpi_card("Loss Avoided", f"${top_intervention.get('total_loss_avoided', 0)/1e9:.1f}B", "Top intervention impact")
+    kpi_card("Loss Avoided", _format_money_short(top_intervention.get('total_loss_avoided', 0)), "Top intervention impact")
 with hero_cols[2]:
     kpi_card("Playback", "Ready" if os.path.exists(training_history_path) else "Missing", "Training view availability")
 with hero_cols[3]:
@@ -1070,7 +1102,7 @@ if active_view == "Dashboard":
                     if roi_key in roi_data_adjusted:
                         r = roi_data_adjusted[roi_key]
                         c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
-                        c2.metric('Loss Avoided', f"${r['total_loss_avoided']/1e9:.1f}B")
+                        c2.metric('Loss Avoided', _format_money_short(r['total_loss_avoided']))
                         c3.metric('Risk Reduction', f"{r['mean_risk_reduction']:.1%}")
 
                         if metadata.get('has_tail_risk'):
@@ -1094,7 +1126,7 @@ for key, data in roi_data_adjusted.items():
     roi_rows.append({
         "Intervention": data.get("name", key),
         "ROI (x)": float(data.get("roi", 0.0)),
-        "Loss Avoided ($B)": float(data.get("total_loss_avoided", 0.0)) / 1e9,
+        "Loss Avoided ($M)": float(data.get("total_loss_avoided", 0.0)) / 1e6,
         "Mean Risk Reduction (%)": float(data.get("mean_risk_reduction", 0.0)) * 100.0,
         "Tail-Risk Nodes Neutralized": int(data.get("tail_risk_nodes_neutralized", 0)),
         "Eligible Footprint (%)": float(data.get("eligible_share", 0.0)) * 100.0,
@@ -1114,7 +1146,7 @@ if compare_view == "Chart":
         filtered_table = roi_table.head(10) if show_top10 else roi_table
         chart_metric = st.selectbox(
             "Chart Metric",
-            ["ROI (x)", "Loss Avoided ($B)", "Mean Risk Reduction (%)"],
+            ["ROI (x)", "Loss Avoided ($M)", "Mean Risk Reduction (%)"],
             index=0,
         )
         chart_df = filtered_table.copy()
@@ -1148,7 +1180,7 @@ else:
         height=min(table_height, 520),
         column_config={
             "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
-            "Loss Avoided ($B)": st.column_config.NumberColumn(format="%.2f"),
+            "Loss Avoided ($M)": st.column_config.NumberColumn(format="%.1f"),
             "Mean Risk Reduction (%)": st.column_config.NumberColumn(format="%.1f"),
             "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.1f"),
         },

@@ -42,6 +42,16 @@ st.markdown(
         --sentree-sidebar-border: rgba(244, 238, 223, 0.18);
     }
 
+    header[data-testid="stHeader"] {
+        visibility: hidden;
+        height: 0;
+    }
+
+    div[data-testid="stToolbar"] {
+        visibility: hidden;
+        height: 0;
+    }
+
     .stApp {
         background:
             radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 30%),
@@ -1031,10 +1041,17 @@ st.markdown(
 )
 
 st.markdown(
-    f"**AI Resilience Summary:** Our GNN has flagged {summary_tail} tail-risk nodes in the SE Asia coastal corridor. "
-    f"By allocating {_format_money_short(capital_allocation)} toward {summary_name}, the fund can avoid about "
-    f"{summary_loss} in projected GDP losses by 2045. That represents a {summary_roi:.2f}x Resilience ROI with "
-    f"{summary_conf*100:.0f}% confidence (proxy based on model uncertainty)."
+    f"""
+    <div class="sentree-card">
+        <div class="sentree-section-label">AI Resilience Summary</div>
+        <p><strong>Our GNN has flagged {summary_tail} tail-risk nodes</strong> in the SE Asia coastal corridor.</p>
+        <p>By allocating {_format_money_short(capital_allocation)} toward {summary_name}, the fund can avoid about
+        {summary_loss} in projected GDP losses by 2045.</p>
+        <p>That represents a {summary_roi:.2f}x Resilience ROI with {summary_conf*100:.0f}% confidence
+        (proxy based on model uncertainty).</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 hero_cols = st.columns(4)
@@ -1114,6 +1131,7 @@ if active_view == "Dashboard":
             st.error(f'Search error: {e}')
             st.info('Showing demo results instead.')
 
+if active_view == "Dashboard":
     # --- Metrics Dashboard ---
     section_header(
         "Compare",
@@ -1121,70 +1139,70 @@ if active_view == "Dashboard":
         "Read the payoff of each resilience strategy across ROI, avoided loss, and risk reduction before drilling into the training playback.",
     )
 
-roi_rows = []
-for key, data in roi_data_adjusted.items():
-    roi_rows.append({
-        "Intervention": data.get("name", key),
-        "ROI (x)": float(data.get("roi", 0.0)),
-        "Loss Avoided ($M)": float(data.get("total_loss_avoided", 0.0)) / 1e6,
-        "Mean Risk Reduction (%)": float(data.get("mean_risk_reduction", 0.0)) * 100.0,
-        "Tail-Risk Nodes Neutralized": int(data.get("tail_risk_nodes_neutralized", 0)),
-        "Eligible Footprint (%)": float(data.get("eligible_share", 0.0)) * 100.0,
-    })
+    roi_rows = []
+    for key, data in roi_data_adjusted.items():
+        roi_rows.append({
+            "Intervention": data.get("name", key),
+            "ROI (x)": float(data.get("roi", 0.0)),
+            "Loss Avoided ($M)": float(data.get("total_loss_avoided", 0.0)) / 1e6,
+            "Mean Risk Reduction (%)": float(data.get("mean_risk_reduction", 0.0)) * 100.0,
+            "Tail-Risk Nodes Neutralized": int(data.get("tail_risk_nodes_neutralized", 0)),
+            "Eligible Footprint (%)": float(data.get("eligible_share", 0.0)) * 100.0,
+        })
 
-roi_table = pd.DataFrame(roi_rows)
-if not roi_table.empty:
-    roi_table = roi_table.sort_values("ROI (x)", ascending=False, ignore_index=True)
-
-view_cols = st.columns([1, 2])
-with view_cols[0]:
-    compare_view = st.radio("View", ["Chart", "Table"], horizontal=True, label_visibility="visible")
-
-if compare_view == "Chart":
+    roi_table = pd.DataFrame(roi_rows)
     if not roi_table.empty:
-        show_top10 = st.checkbox("Top 10 only", value=True, help="Keep the chart short and video-ready.")
-        filtered_table = roi_table.head(10) if show_top10 else roi_table
-        chart_metric = st.selectbox(
-            "Chart Metric",
-            ["ROI (x)", "Loss Avoided ($M)", "Mean Risk Reduction (%)"],
-            index=0,
-        )
-        chart_df = filtered_table.copy()
-        chart_df["Intervention"] = pd.Categorical(
-            chart_df["Intervention"],
-            categories=chart_df.sort_values(chart_metric, ascending=True)["Intervention"],
-            ordered=True,
-        )
-        chart = (
-            alt.Chart(chart_df)
-            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
-            .encode(
-                y=alt.Y("Intervention:N", sort=None, title=""),
-                x=alt.X(f"{chart_metric}:Q", title=chart_metric),
-                color=alt.Color(f"{chart_metric}:Q", scale=alt.Scale(scheme="tealblues")),
-                tooltip=["Intervention", chart_metric],
+        roi_table = roi_table.sort_values("ROI (x)", ascending=False, ignore_index=True)
+
+    view_cols = st.columns([1, 2])
+    with view_cols[0]:
+        compare_view = st.radio("View", ["Chart", "Table"], horizontal=True, label_visibility="visible")
+
+    if compare_view == "Chart":
+        if not roi_table.empty:
+            show_top10 = st.checkbox("Top 10 only", value=True, help="Keep the chart short and video-ready.")
+            filtered_table = roi_table.head(10) if show_top10 else roi_table
+            chart_metric = st.selectbox(
+                "Chart Metric",
+                ["ROI (x)", "Loss Avoided ($M)", "Mean Risk Reduction (%)"],
+                index=0,
             )
-            .properties(height=35 * len(chart_df))
-        )
-        st.altair_chart(chart, use_container_width=True)
+            chart_df = filtered_table.copy()
+            chart_df["Intervention"] = pd.Categorical(
+                chart_df["Intervention"],
+                categories=chart_df.sort_values(chart_metric, ascending=True)["Intervention"],
+                ordered=True,
+            )
+            chart = (
+                alt.Chart(chart_df)
+                .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+                .encode(
+                    y=alt.Y("Intervention:N", sort=None, title=""),
+                    x=alt.X(f"{chart_metric}:Q", title=chart_metric),
+                    color=alt.Color(f"{chart_metric}:Q", scale=alt.Scale(scheme="tealblues")),
+                    tooltip=["Intervention", chart_metric],
+                )
+                .properties(height=35 * len(chart_df))
+            )
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("ROI data not available yet. Run `python scripts/run_pipeline.py` first.")
     else:
-        st.info("ROI data not available yet. Run `python scripts/run_pipeline.py` first.")
-else:
-    show_top10 = st.checkbox("Top 10 only", value=True, help="Keep the table compact and video-ready.")
-    filtered_table = roi_table.head(10) if show_top10 else roi_table
-    table_height = 42 * max(len(filtered_table), 1)
-    st.dataframe(
-        filtered_table,
-        use_container_width=True,
-        hide_index=True,
-        height=min(table_height, 520),
-        column_config={
-            "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
-            "Loss Avoided ($M)": st.column_config.NumberColumn(format="%.1f"),
-            "Mean Risk Reduction (%)": st.column_config.NumberColumn(format="%.1f"),
-            "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.1f"),
-        },
-    )
+        show_top10 = st.checkbox("Top 10 only", value=True, help="Keep the table compact and video-ready.")
+        filtered_table = roi_table.head(10) if show_top10 else roi_table
+        table_height = 42 * max(len(filtered_table), 1)
+        st.dataframe(
+            filtered_table,
+            use_container_width=True,
+            hide_index=True,
+            height=min(table_height, 520),
+            column_config={
+                "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
+                "Loss Avoided ($M)": st.column_config.NumberColumn(format="%.1f"),
+                "Mean Risk Reduction (%)": st.column_config.NumberColumn(format="%.1f"),
+                "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.1f"),
+            },
+        )
 
 if active_view == "GNN Playback":
     training = load_training_history()
@@ -1281,64 +1299,15 @@ if active_view == "Dashboard":
                 or "grid" in p.stem
                 or "megavideo" in p.stem
             ]
-            intervention_individual_videos = [
-                p for p in videos if p.stem.startswith("intervention_risk_") or p.stem.startswith("intervention_only_")
-            ]
-            core_videos = [
-                p
-                for p in videos
-                if p not in comparison_videos and p not in grid_videos and p not in intervention_individual_videos
-            ]
 
             video_type = st.selectbox(
                 "Video type",
-                ["Individual", "Comparison", "Grid"],
+                ["Comparison", "Grid"],
                 index=0,
                 help="Use this dropdown instead of tabs to avoid horizontal scrolling when many videos exist.",
             )
 
-            if video_type == "Individual":
-                individual_kind = st.selectbox(
-                    "Individual kind",
-                    ["Baseline / core", "Intervention (absolute risk)"],
-                    index=0,
-                    help="Baseline/core videos are produced by the pipeline. Intervention-only videos are optional (if present).",
-                )
-
-                if individual_kind == "Intervention (absolute risk)":
-                    if not intervention_individual_videos:
-                        st.info(
-                            "No per-intervention absolute-risk videos found.\n\n"
-                            "Options:\n"
-                            "- Watch comparison videos (baseline vs intervention)\n"
-                            "- Render a mega grid with absolute intervention risk (see `SENTREE_MEGA_GRID_KIND=intervention`)\n"
-                        )
-                    else:
-                        options = {p.stem.replace("_", " ").title(): p for p in intervention_individual_videos}
-                        label = st.selectbox("Select video", list(options.keys()), index=0)
-                        st.caption(str(options[label]))
-                        _show_video(str(options[label]))
-                else:
-                    if not core_videos:
-                        st.info("No baseline/core videos found yet. Run `python scripts/run_pipeline.py`.")
-                    else:
-                        friendly = {
-                            "baseline_risk": "Baseline Risk",
-                            "tail_risk_escalation": "Tail-Risk Escalation",
-                            "climate_classification_shift": "Köppen–Geiger Shift",
-                        }
-                        options = {}
-                        for p in core_videos:
-                            label = friendly.get(p.stem, p.stem.replace("_", " ").title())
-                            # Keep labels unique even if filenames collide
-                            if label in options:
-                                label = f"{label} ({p.name})"
-                            options[label] = p
-                        label = st.selectbox("Select video", list(options.keys()), index=0)
-                        st.caption(str(options[label]))
-                        _show_video(str(options[label]))
-
-            elif video_type == "Comparison":
+            if video_type == "Comparison":
                 if not comparison_videos:
                     st.info("No comparison videos found yet. Render them via `bash scripts/submit_render_comparisons.sh`.")
                 else:

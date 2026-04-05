@@ -83,7 +83,7 @@ roi_data = _load_roi_data()
 video_meta = _base_video_meta()
 video_meta.update(_intervention_video_meta())
 
-videos = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.mp4')]
+videos = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.mp4') and f.startswith('comparison_')]
 for vid_file in videos:
     vid_id = vid_file.replace('.mp4', '')
     vid_path = os.path.join(VIDEO_DIR, vid_file)

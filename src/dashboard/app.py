@@ -1,4 +1,4 @@
-"""SenTree Dashboard — Streamlit UI."""
+﻿"""SenTree Dashboard â€” Streamlit UI."""
 import os
 import sys
 import json
@@ -22,7 +22,7 @@ from matplotlib.collections import LineCollection
 
 from src.simulation.interventions import INTERVENTIONS
 
-st.set_page_config(page_title='SenTree — Resilience ROI Dashboard', layout='wide')
+st.set_page_config(page_title='SenTree â€” Resilience ROI Dashboard', layout='wide')
 
 st.markdown(
     """
@@ -643,7 +643,7 @@ def _approx_cell_size_m(lats: np.ndarray, lons: np.ndarray) -> int:
     cos_factor = float(np.cos(np.deg2rad(ref_lat)))
     cos_factor = float(np.clip(cos_factor, 0.25, 1.0))
 
-    # 1° latitude ~= 111 km (good enough for UI sizing)
+    # 1Â° latitude ~= 111 km (good enough for UI sizing)
     cell = int(round(111_000.0 * step_deg * cos_factor))
     return int(np.clip(cell, 20_000, 350_000))
 
@@ -719,8 +719,8 @@ def _opportunity_points(opportunity):
     })
     df["color"] = colors.tolist()
 
-    # WebMercator (deck.gl basemaps) only supports latitudes up to about ±85.051°.
-    # Global ISIMIP grids often include points up to ~±89°, which will render "off-map"
+    # WebMercator (deck.gl basemaps) only supports latitudes up to about Â±85.051Â°.
+    # Global ISIMIP grids often include points up to ~Â±89Â°, which will render "off-map"
     # in the void. Filter those points for the interactive basemap view.
     df = df[np.abs(df["lat"]) <= _WEB_MERCATOR_MAX_LAT].reset_index(drop=True)
     return df, (vmin, vmax)
@@ -959,7 +959,7 @@ def render_math_view() -> None:
         st.subheader("4. Climate Regime Classification")
         st.markdown(
             dedent(r"""
-                Köppen-Geiger classes are used as climate-relative context so stabilization is measured against each node's regime.
+                KÃ¶ppen-Geiger classes are used as climate-relative context so stabilization is measured against each node's regime.
 
                 - Group A: tropical, where $T_{min} \ge 18^\circ C$
                 - Group B: dry, where annual precipitation is below the dryness threshold
@@ -1093,29 +1093,54 @@ if active_view == "Dashboard":
     with search_cols[1]:
         search_btn = st.button('Search', type='primary', use_container_width=True)
 
+    if "search_results" not in st.session_state:
+        st.session_state.search_results = None
+    if "search_query_text" not in st.session_state:
+        st.session_state.search_query_text = ""
+
 if active_view == "Dashboard":
     # --- Search Results ---
     if search_btn and query:
-        surface_card("Search Results", "Ranked video matches using vector search and intervention metadata.")
-
         try:
             from src.embedding.vectordb import VideoSearchDB
             db = VideoSearchDB()
 
             if db.count() > 0:
-                results = db.query(query, n_results=3)
+                st.session_state.search_results = db.query(query, n_results=3)
+                st.session_state.search_query_text = query
+            else:
+                st.session_state.search_results = "empty"
+        except Exception as e:
+            st.session_state.search_results = {"error": str(e)}
 
-                for i, (vid_id, metadata, distance) in enumerate(zip(
-                    results['ids'][0], results['metadatas'][0], results['distances'][0]
-                )):
-                    similarity = 1 - distance
-                    with st.expander(f'Result {i+1}: {metadata.get("title", vid_id)} — Relevance: {similarity:.1%}', expanded=(i == 0)):
-                        video_path = metadata.get('video_path', f'outputs/videos/{vid_id}.mp4')
-                        if os.path.exists(video_path):
-                            _show_video(video_path)
+    if st.session_state.search_results is not None:
+        surface_card("Search Results", "Ranked video matches using vector search and intervention metadata.")
+        results = st.session_state.search_results
 
-                        c1, c2, c3 = st.columns(3)
-                        roi_key = metadata.get('intervention_key', '')
+        if results == "empty":
+            st.info('No videos indexed yet. Run `python scripts/index_videos.py` first.')
+        elif isinstance(results, dict) and results.get("error"):
+            st.error(f"Search error: {results['error']}")
+            st.info('Showing demo results instead.')
+        else:
+            for i, (vid_id, metadata, distance) in enumerate(zip(
+                results['ids'][0], results['metadatas'][0], results['distances'][0]
+            )):
+                similarity = 1 - distance
+                with st.expander(f"Result {i+1}: {metadata.get('title', vid_id)} — Relevance: {similarity:.1%}", expanded=(i == 0)):
+                    roi_key = metadata.get('intervention_key', '')
+                    comparison_id = f"comparison_{roi_key}" if roi_key else vid_id
+                    comparison_path = f"outputs/videos/{comparison_id}.mp4"
+                    if os.path.exists(comparison_path):
+                        _show_video(comparison_path)
+                    else:
+                        fallback_path = metadata.get('video_path', f"outputs/videos/{vid_id}.mp4")
+                        if os.path.exists(fallback_path):
+                            _show_video(fallback_path)
+                        else:
+                            st.info("No comparison video found for this result yet.")
+
+                    c1, c2, c3 = st.columns(3)
                     if roi_key in roi_data_adjusted:
                         r = roi_data_adjusted[roi_key]
                         c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
@@ -1124,13 +1149,6 @@ if active_view == "Dashboard":
 
                         if metadata.get('has_tail_risk'):
                             st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
-            else:
-                st.info('No videos indexed yet. Run `python scripts/index_videos.py` first.')
-
-        except Exception as e:
-            st.error(f'Search error: {e}')
-            st.info('Showing demo results instead.')
-
 if active_view == "Dashboard":
     # --- Metrics Dashboard ---
     section_header(
@@ -1376,7 +1394,7 @@ if active_view == "Dashboard":
     section_header(
         "Locate",
         "Tail-risk escalation map",
-        "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model’s extreme-regime threshold.",
+        "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the modelâ€™s extreme-regime threshold.",
     )
     if opportunity is not None:
         with st.expander("Interactive map (optional)", expanded=False):
@@ -1485,4 +1503,6 @@ if active_view == "Math":
 
 # --- Footer ---
 st.divider()
-st.caption('SenTree — Resilience ROI Dashboard | ML@Purdue Catapult Hackathon')
+st.caption('SenTree â€” Resilience ROI Dashboard | ML@Purdue Catapult Hackathon')
+
+

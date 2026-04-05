@@ -457,26 +457,11 @@ def kpi_card(label: str, value: str, subtitle: str) -> None:
         unsafe_allow_html=True,
     )
 
-# --- Sidebar ---
-with st.sidebar:
-    st.markdown('<div class="sentree-kicker">Mission Control</div>', unsafe_allow_html=True)
-    st.markdown("## Scenario Controls")
-    st.markdown("Tune the climate lens, intervention package, and search posture before diving into simulations.")
-    scenario = "SSP3-7.0 (High Emissions)"
-    intervention = "Investor Mode"
-    capital_allocation_m = st.slider(
-        "Total Capital Allocation (USD)",
-        min_value=5,
-        max_value=100,
-        value=50,
-        step=5,
-        format="$%dM",
-        help="Investor-mode sensitivity: adjust capital to see ROI and loss avoided update with a diminishing-returns assumption.",
-    )
-    capital_allocation = int(capital_allocation_m) * 1_000_000
-    st.divider()
-    surface_card("Deployment Region", "SE Asia coastal network with tail-risk emphasis on dense coastal and agricultural nodes.")
-    surface_card("Forecast Horizon", "2015-2100 scenario window with intervention comparisons and searchable video outputs.")
+# --- Runtime control state (rendered later near AI summary) ---
+scenario = "SSP3-7.0 (High Emissions)"
+intervention = "Investor Mode"
+capital_allocation_m = int(st.session_state.get("capital_allocation_m", 50))
+capital_allocation = int(capital_allocation_m) * 1_000_000
 
 # --- Load results ---
 @st.cache_data
@@ -1045,6 +1030,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+control_cols = st.columns([2.5, 1, 1])
+with control_cols[0]:
+    capital_allocation_m = st.slider(
+        "Total Capital Allocation (USD)",
+        min_value=5,
+        max_value=100,
+        value=capital_allocation_m,
+        step=5,
+        format="$%dM",
+        key="capital_allocation_m",
+        help="Investor-mode sensitivity: adjust capital to see ROI and loss avoided update with a diminishing-returns assumption.",
+    )
+with control_cols[1]:
+    st.markdown("**Region**")
+    st.caption("SE Asia Coastal")
+with control_cols[2]:
+    st.markdown("**Horizon**")
+    st.caption("2015-2100")
+
 st.markdown(
     f"""
     <div class="sentree-card">
@@ -1071,7 +1075,6 @@ st.caption(
     f"Investor mode: metrics scale with ${capital_allocation/1e6:.0f}M total capital "
     "(sublinear, diminishing-returns assumption)."
 )
-st.caption("Sidebar hidden? Press Ctrl+B (Windows/Linux) or Cmd+B (Mac) to toggle it back.")
 
 active_view = st.radio(
     "View",
@@ -1472,26 +1475,15 @@ if active_view == "Dashboard":
                     opacity=0.68 if not extruded else 0.85,
                 )
 
-                flagged = df_pts[df_pts["tail_flag"]].copy()
-                layer_flags = pdk.Layer(
-                    "ScatterplotLayer",
-                    data=flagged,
-                    get_position=["lon", "lat"],
-                    get_radius=max(10_000, int(round(0.45 * cell_size_m))),
-                    get_fill_color=[230, 30, 30, 190],
-                    pickable=True,
-                )
-
                 tooltip = {
                     "text": (
                         "Avoided damage potential: {value}\n"
-                        "Tail-risk flagged: {tail_flag}\n"
                         "Nearest: {nearest_city} (~{nearest_km} km)"
                     )
                 }
 
                 deck = pdk.Deck(
-                    layers=[layer_cells, layer_flags],
+                    layers=[layer_cells],
                     initial_view_state=view,
                     tooltip=tooltip,
                     map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",

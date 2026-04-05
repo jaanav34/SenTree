@@ -303,19 +303,51 @@ def render_tail_risk_video(risk_series, flags_series, lats, lons, output_path,
 def render_tail_risk_map(value_grid, flags_grid, lats, lons, output_path,
                         title='Resilience Opportunity Map', label='ROI Potential (Risk Reduction)',
                         scale_factor=8):
-    """Save a coordinate-accurate map highlighting ROI potential and target nodes."""
-    fig, ax = plt.subplots(figsize=(14, 8))
+    """Save a coordinate-accurate map highlighting ROI potential and target nodes.
+
+    If Cartopy is available, this will draw coastlines/borders for geographic context.
+    (Falls back gracefully when Cartopy is not installed.)
+    """
+    use_cartopy = os.environ.get("SENTREE_DRAW_BORDERS", "1").strip().lower() not in {"0", "false", "no", "off"}
+    ax = None
+    fig = None
+
+    if use_cartopy:
+        try:
+            import cartopy.crs as ccrs
+            import cartopy.feature as cfeature
+
+            fig = plt.figure(figsize=(14, 8))
+            ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+
+            ax.add_feature(cfeature.LAND.with_scale("110m"), facecolor=(0.96, 0.96, 0.96), zorder=0)
+            ax.add_feature(cfeature.OCEAN.with_scale("110m"), facecolor=(1.0, 1.0, 1.0), zorder=0)
+            ax.add_feature(cfeature.COASTLINE.with_scale("110m"), linewidth=0.6, edgecolor=(0, 0, 0, 0.55), zorder=3)
+            ax.add_feature(cfeature.BORDERS.with_scale("110m"), linewidth=0.4, edgecolor=(0, 0, 0, 0.35), zorder=3)
+        except Exception as e:
+            print(f"WARNING: Cartopy unavailable for borders overlay ({e}); rendering ROI PNG without coastlines.")
+            fig, ax = plt.subplots(figsize=(14, 8))
+    else:
+        fig, ax = plt.subplots(figsize=(14, 8))
+
     extent = [lons[0], lons[-1], lats[0], lats[-1]]
 
     # Background: Resilience Opportunity (Green = high reduction potential)
     hires = downscale_grid(value_grid, scale_factor=scale_factor)
     im = ax.imshow(hires, cmap='Greens', origin='lower',
-                   extent=extent, aspect='auto')
+                   extent=extent, aspect='auto', zorder=1)
 
     # Add Coordinate Grid for exact location identification
-    ax.grid(True, linestyle='--', alpha=0.4, color='gray')
-    ax.set_xticks(np.linspace(lons[0], lons[-1], 10))
-    ax.set_yticks(np.linspace(lats[0], lats[-1], 10))
+    try:
+        ax.grid(True, linestyle='--', alpha=0.35, color='gray')
+    except Exception:
+        pass
+    try:
+        ax.set_xticks(np.linspace(lons[0], lons[-1], 10))
+        ax.set_yticks(np.linspace(lats[0], lats[-1], 10))
+    except Exception:
+        # Cartopy axes manage ticks differently; leave defaults.
+        pass
 
     lat_grid, lon_grid = np.meshgrid(lats, lons, indexing='ij')
     lat_flat, lon_flat = lat_grid.flatten(), lon_grid.flatten()

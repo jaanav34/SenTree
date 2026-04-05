@@ -1238,16 +1238,104 @@ if active_view == "Dashboard":
         "Review the rendered outputs that feed the search index and communicate the intervention story visually.",
     )
 
-    video_dir = 'outputs/videos'
-    if os.path.exists(video_dir):
-        videos = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
+    video_dir = Path("outputs/videos")
+    if video_dir.exists():
+        videos = sorted(video_dir.glob("*.mp4"), key=lambda p: p.name.lower())
         if videos:
-            tabs = st.tabs([v.replace('.mp4', '').replace('_', ' ').title() for v in videos])
-            for tab, vid in zip(tabs, videos):
-                with tab:
-                    _show_video(os.path.join(video_dir, vid))
+            comparison_videos = [p for p in videos if p.name.startswith("comparison_")]
+            grid_videos = [
+                p
+                for p in videos
+                if p.stem.startswith("interventions_")
+                or p.stem.startswith("megavideo_")
+                or "grid" in p.stem
+                or "megavideo" in p.stem
+            ]
+            intervention_individual_videos = [
+                p for p in videos if p.stem.startswith("intervention_risk_") or p.stem.startswith("intervention_only_")
+            ]
+            core_videos = [
+                p
+                for p in videos
+                if p not in comparison_videos and p not in grid_videos and p not in intervention_individual_videos
+            ]
+
+            video_type = st.selectbox(
+                "Video type",
+                ["Individual", "Comparison", "Grid"],
+                index=0,
+                help="Use this dropdown instead of tabs to avoid horizontal scrolling when many videos exist.",
+            )
+
+            if video_type == "Individual":
+                individual_kind = st.selectbox(
+                    "Individual kind",
+                    ["Baseline / core", "Intervention (absolute risk)"],
+                    index=0,
+                    help="Baseline/core videos are produced by the pipeline. Intervention-only videos are optional (if present).",
+                )
+
+                if individual_kind == "Intervention (absolute risk)":
+                    if not intervention_individual_videos:
+                        st.info(
+                            "No per-intervention absolute-risk videos found.\n\n"
+                            "Options:\n"
+                            "- Watch comparison videos (baseline vs intervention)\n"
+                            "- Render a mega grid with absolute intervention risk (see `SENTREE_MEGA_GRID_KIND=intervention`)\n"
+                        )
+                    else:
+                        options = {p.stem.replace("_", " ").title(): p for p in intervention_individual_videos}
+                        label = st.selectbox("Select video", list(options.keys()), index=0)
+                        st.caption(str(options[label]))
+                        _show_video(str(options[label]))
+                else:
+                    if not core_videos:
+                        st.info("No baseline/core videos found yet. Run `python scripts/run_pipeline.py`.")
+                    else:
+                        friendly = {
+                            "baseline_risk": "Baseline Risk",
+                            "tail_risk_escalation": "Tail-Risk Escalation",
+                            "climate_classification_shift": "Köppen–Geiger Shift",
+                        }
+                        options = {}
+                        for p in core_videos:
+                            label = friendly.get(p.stem, p.stem.replace("_", " ").title())
+                            # Keep labels unique even if filenames collide
+                            if label in options:
+                                label = f"{label} ({p.name})"
+                            options[label] = p
+                        label = st.selectbox("Select video", list(options.keys()), index=0)
+                        st.caption(str(options[label]))
+                        _show_video(str(options[label]))
+
+            elif video_type == "Comparison":
+                if not comparison_videos:
+                    st.info("No comparison videos found yet. Render them via `bash scripts/submit_render_comparisons.sh`.")
+                else:
+                    def _cmp_label(p: Path) -> str:
+                        key = p.stem[len("comparison_") :] if p.stem.startswith("comparison_") else p.stem
+                        name = INTERVENTIONS.get(key, {}).get("name") or key.replace("_", " ").title()
+                        return f"{name}"
+
+                    options = { _cmp_label(p): p for p in sorted(comparison_videos, key=_cmp_label) }
+                    label = st.selectbox("Select intervention", list(options.keys()), index=0)
+                    st.caption(str(options[label]))
+                    _show_video(str(options[label]))
+
+            else:  # Grid
+                if not grid_videos:
+                    st.info(
+                        "No grid/mega videos found yet.\n\n"
+                        "Render one with:\n"
+                        "`python scripts/render_megavideo_from_npz.py --mode grid --out outputs/videos/interventions_grid.mp4 --ncols 6`"
+                    )
+                else:
+                    options = {p.stem.replace("_", " ").title(): p for p in grid_videos}
+                    label = st.selectbox("Select grid video", list(options.keys()), index=0)
+                    st.caption(str(options[label]))
+                    _show_video(str(options[label]))
         else:
-            st.info('No videos generated yet. Run `python scripts/run_pipeline.py`.')
+            st.info("No videos generated yet. Run `python scripts/run_pipeline.py`.")
     else:
         st.info('Output directory not found. Run the pipeline first.')
 

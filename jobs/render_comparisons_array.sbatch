@@ -6,15 +6,18 @@
 # and created:
 #   outputs/roi/risk_series/baseline.npz
 #   outputs/roi/risk_series/intervention_<key>.npz
-#   outputs/roi/risk_series/intervention_keys.txt
-#   outputs/roi/risk_series/intervention_names.json
+#
+# A keys/names manifest is required for Slurm arrays; the wrapper generates it
+# under `scripts/.cache/` by default and exports paths via env vars:
+#   SENTREE_KEYS_FILE, SENTREE_NAMES_JSON
 #
 # Submit via the wrapper:
 #   scripts/submit_render_comparisons.sh
 #
 # Or manually:
-#   N=$(wc -l < outputs/roi/risk_series/intervention_keys.txt)
-#   sbatch --array=1-$N jobs/render_comparisons_array.sbatch
+#   export SENTREE_KEYS_FILE=scripts/.cache/intervention_keys.txt
+#   N=$(wc -l < "$SENTREE_KEYS_FILE")
+#   sbatch --export=ALL --array=1-$N jobs/render_comparisons_array.sbatch
 #
 
 #SBATCH -J sentree_render_cmp
@@ -51,4 +54,3 @@ echo "Rendering comparison video for key=$KEY (task $TASK_ID)"
 echo "FPS=${SENTREE_RENDER_FPS:-4} SCALE=${SENTREE_RENDER_SCALE_FACTOR:-8} DPI=${SENTREE_RENDER_DPI:-}"
 
 python scripts/render_comparison_from_npz.py --key "$KEY" --names-json "$NAMES_JSON"
-

@@ -33,13 +33,22 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 from src.rendering.render_video import _save_animation
+from src.simulation.interventions import INTERVENTIONS
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["grid", "cycle"], default="grid")
-    parser.add_argument("--keys", default="outputs/roi/risk_series/intervention_keys.txt")
-    parser.add_argument("--names", default="outputs/roi/risk_series/intervention_names.json")
+    parser.add_argument(
+        "--keys",
+        default=None,
+        help="Optional path to intervention_keys.txt. If omitted/missing, keys are discovered from NPZs in --series-dir or from INTERVENTIONS.",
+    )
+    parser.add_argument(
+        "--names",
+        default=None,
+        help="Optional path to intervention_names.json. If omitted/missing, names are taken from INTERVENTIONS.",
+    )
     parser.add_argument("--baseline", default="outputs/roi/risk_series/baseline.npz")
     parser.add_argument("--series-dir", default="outputs/roi/risk_series")
     parser.add_argument("--out", default="outputs/videos/interventions_megavideo.mp4")
@@ -52,20 +61,43 @@ def main() -> int:
     parser.add_argument("--cmap", default="YlOrRd")
     args = parser.parse_args()
 
-    keys_path = Path(args.keys)
-    if not keys_path.exists():
-        raise SystemExit(f"Missing keys file: {keys_path}")
-    keys = [k.strip() for k in keys_path.read_text(encoding="utf-8").splitlines() if k.strip()]
+    keys: list[str] = []
+    keys_path = Path(args.keys) if args.keys else None
+    if keys_path and keys_path.exists():
+        keys = [k.strip() for k in keys_path.read_text(encoding="utf-8").splitlines() if k.strip()]
+    else:
+        series_dir = Path(args.series_dir)
+        if series_dir.exists():
+            npz_keys = []
+            for p in sorted(series_dir.glob("intervention_*.npz")):
+                name = p.name
+                if not name.startswith("intervention_") or not name.endswith(".npz"):
+                    continue
+                npz_keys.append(name[len("intervention_") : -len(".npz")])
+            if npz_keys:
+                keys = npz_keys
+                print(f"Discovered {len(keys)} interventions from NPZs in {series_dir}.")
+        if not keys:
+            keys = sorted(INTERVENTIONS.keys())
+            msg = f"Using INTERVENTIONS from code ({len(keys)} keys)"
+            if keys_path:
+                msg = f"Keys file not found ({keys_path}); {msg}."
+            else:
+                msg = f"No keys file provided; {msg}."
+            print(msg)
+
     if not keys:
-        raise SystemExit(f"No keys found in {keys_path}")
+        raise SystemExit("No intervention keys available (no NPZs found and INTERVENTIONS is empty).")
 
     names = {}
-    names_path = Path(args.names)
-    if names_path.exists():
+    names_path = Path(args.names) if args.names else None
+    if names_path and names_path.exists():
         try:
             names = json.loads(names_path.read_text(encoding="utf-8"))
         except Exception:
             names = {}
+    if not names:
+        names = {k: str(INTERVENTIONS.get(k, {}).get("name", k)) for k in keys}
 
     b = np.load(Path(args.baseline), allow_pickle=False)
     baseline = b["baseline"].astype(np.float32)
@@ -83,9 +115,20 @@ def main() -> int:
 
     # Preload interventions series (keeps render deterministic/fast; uses RAM).
     interventions = {}
+    missing = []
     for key in keys:
         p = Path(args.series_dir) / f"intervention_{key}.npz"
+        if not p.exists():
+            missing.append(key)
+            continue
         interventions[key] = np.load(p, allow_pickle=False)["intervention"].astype(np.float32)
+
+    if missing:
+        print(f"Skipping {len(missing)} interventions with no NPZ present under {args.series_dir}.")
+        keys = [k for k in keys if k in interventions]
+
+    if not keys:
+        raise SystemExit(f"No intervention NPZs found under {args.series_dir}; cannot render mega video.")
 
     # Baseline scale fixed for visual consistency.
     base_vmin = float(np.nanmin(baseline))

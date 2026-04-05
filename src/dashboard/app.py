@@ -1378,23 +1378,17 @@ if active_view == "Dashboard":
         "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model’s extreme-regime threshold.",
     )
     if opportunity is not None:
-        map_mode = st.selectbox(
-            "Map view",
-            [
-                "2D ROI map (basemap)",
-                "3D ROI extrusion (slower)",
-                "Static ROI PNG",
-            ],
-            index=0,
-            help=(
-                "2D mode keeps the ROI grid but uses a basemap so you can see continents/borders. "
-                "3D extrusion is heavier and can look distorted near the poles. "
-                "Static PNG is fastest but has no basemap context."
-            ),
-            key="sentree_map_mode",
-        )
-
-        if map_mode != "Static ROI PNG":
+        with st.expander("Interactive map (optional)", expanded=False):
+            st.caption("Optional 2D/3D basemap view. The default below is the static ROI PNG.")
+            map_mode = st.selectbox(
+                "Interactive map mode",
+                [
+                    "2D ROI map (basemap)",
+                    "3D ROI extrusion (slower)",
+                ],
+                index=0,
+                key="sentree_map_mode",
+            )
             st.markdown("Hover any cell to see a real-world label (nearest city + distance).")
             try:
                 import pydeck as pdk
@@ -1417,8 +1411,6 @@ if active_view == "Dashboard":
                         }
                     )
 
-                # Optional downsample for performance if needed.
-                # 16k points (global coarsen=4) is fine; only downsample when extremely large.
                 max_points = 50_000
                 if len(df_pts) > max_points:
                     df_pts = df_pts.sample(max_points, random_state=0)
@@ -1426,9 +1418,7 @@ if active_view == "Dashboard":
                 lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
                 lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
                 zoom = _suggest_pydeck_zoom(lat_span, lon_span)
-                pitch = 0
-                if map_mode == "3D ROI extrusion (slower)":
-                    pitch = 0 if zoom <= 2.2 else 50
+                pitch = 0 if map_mode == "2D ROI map (basemap)" else (0 if zoom <= 2.2 else 50)
 
                 view = pdk.ViewState(
                     latitude=float(df_pts["lat"].median()),
@@ -1437,10 +1427,9 @@ if active_view == "Dashboard":
                     pitch=pitch,
                 )
 
-                # Grid cells (ROI heatmap)
                 cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
                 extruded = map_mode == "3D ROI extrusion (slower)"
-                elevation_scale = 4000.0 if extruded else 1.0  # ignored when extruded=False
+                elevation_scale = 4000.0 if extruded else 1.0
                 layer_cells = pdk.Layer(
                     "GridCellLayer",
                     data=df_pts,
@@ -1454,7 +1443,6 @@ if active_view == "Dashboard":
                     opacity=0.68 if not extruded else 0.85,
                 )
 
-                # Tail-risk flags (red dots overlaid)
                 flagged = df_pts[df_pts["tail_flag"]].copy()
                 layer_flags = pdk.Layer(
                     "ScatterplotLayer",
@@ -1483,17 +1471,13 @@ if active_view == "Dashboard":
                 st.pydeck_chart(deck, width='stretch')
                 st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
             except Exception as e:
-                st.info(f"Interactive map unavailable ({e}). Showing static map below.")
+                st.info(f"Interactive map unavailable ({e}).")
 
     tail_risk_img = 'outputs/tail_risk_map.png'
-    if opportunity is not None and st.session_state.get("sentree_map_mode") != "Static ROI PNG":
-        # The interactive basemap is shown above; only show PNG when explicitly requested or as fallback.
-        pass
+    if os.path.exists(tail_risk_img):
+        st.image(tail_risk_img, width='stretch')
     else:
-        if os.path.exists(tail_risk_img):
-            st.image(tail_risk_img, width='stretch')
-        else:
-            st.info('Tail-risk map not generated yet.')
+        st.info('Tail-risk map not generated yet.')
 
 if active_view == "Math":
     render_math_view()

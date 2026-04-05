@@ -24,6 +24,12 @@ npm install
 npm run dev
 ```
 
+Or from the repo root:
+
+```bash
+./scripts/run_gnn_playback.sh
+```
+
 Default dev URL:
 
 ```text

@@ -15,6 +15,7 @@ ensure_venv()
 import streamlit as st
 import pandas as pd
 import numpy as np
+import altair as alt
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.collections import LineCollection
@@ -1104,12 +1105,50 @@ roi_table = pd.DataFrame(roi_rows)
 if not roi_table.empty:
     roi_table = roi_table.sort_values("ROI (x)", ascending=False, ignore_index=True)
 
-table_tab, chart_tab = st.tabs(["Table", "Chart"])
-with table_tab:
+view_cols = st.columns([1, 1, 2])
+with view_cols[0]:
+    compare_view = st.radio("View", ["Chart", "Table"], horizontal=True, label_visibility="visible")
+with view_cols[1]:
+    show_top10 = st.checkbox("Top 10 only", value=True)
+
+filtered_table = roi_table
+if show_top10 and not roi_table.empty:
+    filtered_table = roi_table.head(10)
+
+if compare_view == "Chart":
+    if not filtered_table.empty:
+        chart_metric = st.selectbox(
+            "Chart Metric",
+            ["ROI (x)", "Loss Avoided ($B)", "Mean Risk Reduction (%)"],
+            index=0,
+        )
+        chart_df = filtered_table.copy()
+        chart_df["Intervention"] = pd.Categorical(
+            chart_df["Intervention"],
+            categories=chart_df.sort_values(chart_metric, ascending=True)["Intervention"],
+            ordered=True,
+        )
+        chart = (
+            alt.Chart(chart_df)
+            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+            .encode(
+                y=alt.Y("Intervention:N", sort=None, title=""),
+                x=alt.X(f"{chart_metric}:Q", title=chart_metric),
+                color=alt.Color(f"{chart_metric}:Q", scale=alt.Scale(scheme="tealblues")),
+                tooltip=["Intervention", chart_metric],
+            )
+            .properties(height=35 * len(chart_df))
+        )
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.info("ROI data not available yet. Run `python scripts/run_pipeline.py` first.")
+else:
+    table_height = 42 * max(len(filtered_table), 1)
     st.dataframe(
-        roi_table,
+        filtered_table,
         use_container_width=True,
         hide_index=True,
+        height=min(table_height, 520),
         column_config={
             "ROI (x)": st.column_config.NumberColumn(format="%.2f"),
             "Loss Avoided ($B)": st.column_config.NumberColumn(format="%.2f"),
@@ -1117,18 +1156,6 @@ with table_tab:
             "Eligible Footprint (%)": st.column_config.NumberColumn(format="%.1f"),
         },
     )
-
-with chart_tab:
-    if not roi_table.empty:
-        chart_metric = st.selectbox(
-            "Chart Metric",
-            ["ROI (x)", "Loss Avoided ($B)", "Mean Risk Reduction (%)"],
-            index=0,
-        )
-        chart_df = roi_table.set_index("Intervention")[[chart_metric]].sort_values(chart_metric, ascending=False)
-        st.bar_chart(chart_df, use_container_width=True)
-    else:
-        st.info("ROI data not available yet. Run `python scripts/run_pipeline.py` first.")
 
 if active_view == "GNN Playback":
     training = load_training_history()

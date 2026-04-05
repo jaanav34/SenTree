@@ -22,7 +22,7 @@ from matplotlib.collections import LineCollection
 
 from src.simulation.interventions import INTERVENTIONS
 
-st.set_page_config(page_title='SenTree â€” Resilience ROI Dashboard', layout='wide')
+st.set_page_config(page_title='SenTree - Resilience ROI Dashboard', layout='wide', initial_sidebar_state="expanded")
 
 st.markdown(
     """
@@ -1071,6 +1071,7 @@ st.caption(
     f"Investor mode: metrics scale with ${capital_allocation/1e6:.0f}M total capital "
     "(sublinear, diminishing-returns assumption)."
 )
+st.caption("Sidebar hidden? Press Ctrl+B (Windows/Linux) or Cmd+B (Mac) to toggle it back.")
 
 active_view = st.radio(
     "View",
@@ -1483,7 +1484,6 @@ if active_view == "Dashboard":
 
                 tooltip = {
                     "text": (
-                        "Lon: {lon}\nLat: {lat}\n"
                         "Avoided damage potential: {value}\n"
                         "Tail-risk flagged: {tail_flag}\n"
                         "Nearest: {nearest_city} (~{nearest_km} km)"
@@ -1512,6 +1512,6 @@ if active_view == "Math":
 
 # --- Footer ---
 st.divider()
-st.caption('SenTree â€” Resilience ROI Dashboard | ML@Purdue Catapult Hackathon')
+st.caption('SenTree - Resilience ROI Dashboard | ML@Purdue Catapult Hackathon')
 
 

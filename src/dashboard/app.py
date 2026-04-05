@@ -553,7 +553,7 @@ def kpi_card(label: str, value: str, subtitle: str) -> None:
 # ---------------------------------------------------------------------------
 # Navigation state — sidebar drives all sub-page routing
 # ---------------------------------------------------------------------------
-scenario = "SSP3-7.0 (High Emissions)"
+scenario = "SSP3-7.0 (Moderately High Emissions"
 intervention = "Investor Mode"
 capital_allocation_m = int(st.session_state.get("capital_allocation_m", 50))
 
@@ -634,7 +634,6 @@ with st.sidebar:
                 Context
             </div>
             <div style="font-size:0.82rem;color:rgba(237,232,216,0.80);line-height:1.7;">
-                <div>📍 SE Asia Coastal</div>
                 <div>📅 2015–2100</div>
                 <div>⚡ {scenario}</div>
             </div>

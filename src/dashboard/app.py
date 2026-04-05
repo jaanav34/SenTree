@@ -782,7 +782,7 @@ def build_training_figure(training, epoch_idx, show_edges=True, highlight_target
     ax_risk.set_ylabel("Risk score")
     ax_risk.grid(alpha=0.18)
     ax_risk.set_facecolor("#fffdf7")
-    ax_risk.legend(frameon=False, loc="upper left")
+    ax_risk.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0)
 
     fig.patch.set_facecolor("#fffaf2")
     return fig

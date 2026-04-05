@@ -192,6 +192,14 @@ render_core_videos = render_videos and (os.environ.get("SENTREE_RENDER_CORE_VIDE
 render_map_png = os.environ.get("SENTREE_RENDER_MAP_PNG", "1").strip().lower() not in {"0", "false", "no", "off"}
 render_comparisons = render_videos and (os.environ.get("SENTREE_RENDER_COMPARISON_VIDEOS", "1").strip().lower() not in {"0", "false", "no", "off"})
 compute_time_series = os.environ.get("SENTREE_COMPUTE_TIME_SERIES", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+# Backwards-friendly aliases for teammates / quick runs.
+if os.environ.get("SENTREE_NO_VIDEOS", "").strip().lower() in {"1", "true", "yes", "on"}:
+    render_videos = False
+    render_core_videos = False
+    render_comparisons = False
+if os.environ.get("SENTREE_NO_COMPARISON_VIDEOS", "").strip().lower() in {"1", "true", "yes", "on"}:
+    render_comparisons = False
 render_only_keys_env = os.environ.get("SENTREE_RENDER_INTERVENTION_KEYS", "").strip()
 render_only_keys = None
 if render_only_keys_env:

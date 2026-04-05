@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import base64
 from pathlib import Path
 from textwrap import dedent
 
@@ -27,203 +28,349 @@ st.set_page_config(page_title='SenTree - Resilience ROI Dashboard', layout='wide
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800;900&family=DM+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,300;9..144,700;9..144,900&display=swap');
+
     :root {
-        --sentree-ink: #18322d;
-        --sentree-ink-soft: #29443d;
-        --sentree-ink-muted: #5a6f69;
-        --sentree-accent: #0f766e;
-        --sentree-accent-warm: #b45309;
-        --sentree-card-top: rgba(255, 251, 245, 0.96);
-        --sentree-card-bottom: rgba(245, 249, 246, 0.94);
-        --sentree-sidebar-bg: linear-gradient(180deg, #17342f 0%, #1f2d3d 100%);
-        --sentree-sidebar-ink: #f4eedf;
-        --sentree-sidebar-muted: #d8d1bf;
-        --sentree-sidebar-field: rgba(251, 247, 238, 0.96);
-        --sentree-sidebar-border: rgba(244, 238, 223, 0.18);
+        --sentree-ink: #0f1f1c;
+        --sentree-ink-soft: #243b35;
+        --sentree-ink-muted: #4a6159;
+        --sentree-accent: #0d9488;
+        --sentree-accent-dark: #0f766e;
+        --sentree-accent-warm: #c2690a;
+        --sentree-accent-warm-soft: rgba(194, 105, 10, 0.12);
+        --sentree-glow: rgba(13, 148, 136, 0.18);
+        --sentree-glow-warm: rgba(194, 105, 10, 0.14);
+        --sentree-card-top: rgba(252, 249, 242, 0.97);
+        --sentree-card-bottom: rgba(240, 248, 244, 0.95);
+        --sentree-card-border: rgba(15, 50, 42, 0.09);
+        --sentree-sidebar-bg: linear-gradient(160deg, #0c1e1a 0%, #122920 50%, #0e2235 100%);
+        --sentree-sidebar-ink: #ede8d8;
+        --sentree-sidebar-muted: #c8c0a8;
+        --sentree-sidebar-field: rgba(248, 244, 234, 0.94);
+        --sentree-sidebar-border: rgba(237, 232, 216, 0.14);
+        --radius-card: 24px;
+        --radius-pill: 999px;
+        --shadow-card: 0 2px 4px rgba(10,30,24,0.04), 0 8px 24px rgba(10,30,24,0.07), 0 24px 48px rgba(10,30,24,0.05);
+        --shadow-card-hover: 0 4px 8px rgba(10,30,24,0.06), 0 16px 40px rgba(10,30,24,0.12), 0 40px 72px rgba(10,30,24,0.07);
+        --shadow-hero: 0 1px 2px rgba(10,30,24,0.04), 0 8px 32px rgba(10,30,24,0.08), 0 32px 80px rgba(10,30,24,0.08);
     }
 
-    header[data-testid="stHeader"] {
-        visibility: hidden;
-        height: 0;
+    @keyframes fadeSlideUp {
+        from { opacity: 0; transform: translateY(14px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes shimmer {
+        0%   { background-position: -200% center; }
+        100% { background-position: 200% center; }
+    }
+    @keyframes pulseGlow {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(13,148,136,0); }
+        50%       { box-shadow: 0 0 0 6px rgba(13,148,136,0.10); }
+    }
+    @keyframes spinSlow {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
     }
 
-    div[data-testid="stToolbar"] {
-        visibility: hidden;
-        height: 0;
-    }
+    header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+    div[data-testid="stToolbar"]   { visibility: hidden; height: 0; }
 
+    /* ── Page background ─────────────────────────────────────────── */
     .stApp {
         background:
-            radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 30%),
-            radial-gradient(circle at top right, rgba(180, 83, 9, 0.12), transparent 28%),
-            linear-gradient(180deg, #f1eee2 0%, #e4efe8 54%, #f6f3ea 100%);
+            radial-gradient(ellipse 60% 45% at 8% 0%,   rgba(13,148,136,0.13) 0%, transparent 100%),
+            radial-gradient(ellipse 50% 40% at 95% 5%,  rgba(194,105,10,0.10) 0%, transparent 100%),
+            radial-gradient(ellipse 80% 60% at 50% 100%,rgba(13,148,136,0.06) 0%, transparent 100%),
+            linear-gradient(170deg, #eeeade 0%, #e2ede7 38%, #eceae0 70%, #f0ede3 100%);
         color: var(--sentree-ink);
         overflow-x: hidden;
+        font-family: "Cabinet Grotesk", "Manrope", system-ui, sans-serif;
+        font-size: 15px;
+        letter-spacing: -0.01em;
     }
 
-    html, body {
-        overflow-x: hidden;
+    /* Subtle noise texture overlay */
+    .stApp::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+        background-size: 180px;
+        pointer-events: none;
+        z-index: 0;
+        opacity: 0.6;
     }
+
+    html, body { overflow-x: hidden; }
 
     .block-container {
-        max-width: 1320px;
-        padding-top: 2rem;
-        padding-bottom: 3rem;
+        max-width: 1340px;
+        padding-top: 2.2rem;
+        padding-bottom: 4rem;
+        animation: fadeSlideUp 0.5s ease both;
     }
 
+    /* ── Hero ────────────────────────────────────────────────────── */
     .sentree-hero {
         position: relative;
         overflow: hidden;
-        padding: 1.6rem 1.7rem 1.5rem 1.7rem;
-        border-radius: 28px;
+        padding: 2rem 2.2rem 1.8rem;
+        border-radius: 32px;
         background:
-            radial-gradient(circle at 85% 18%, rgba(255, 255, 255, 0.34), transparent 20%),
-            radial-gradient(circle at 10% 5%, rgba(15, 118, 110, 0.16), transparent 22%),
-            linear-gradient(135deg, rgba(255, 252, 246, 0.95), rgba(232, 243, 237, 0.92));
-        border: 1px solid rgba(23, 52, 47, 0.12);
-        box-shadow: 0 20px 50px rgba(23, 52, 47, 0.10);
-        margin-bottom: 1.4rem;
+            radial-gradient(circle at 88% 15%, rgba(255,255,255,0.42) 0%, transparent 22%),
+            radial-gradient(circle at 6% 80%,  rgba(13,148,136,0.10) 0%, transparent 26%),
+            linear-gradient(138deg, rgba(255,253,247,0.97) 0%, rgba(230,243,238,0.94) 100%);
+        border: 1px solid rgba(15,118,110,0.14);
+        box-shadow: var(--shadow-hero);
+        margin-bottom: 1.6rem;
+        animation: fadeSlideUp 0.5s 0.05s ease both;
     }
 
+    /* Decorative arc in top-right */
+    .sentree-hero::before {
+        content: "";
+        position: absolute;
+        top: -60px; right: -60px;
+        width: 260px; height: 260px;
+        border-radius: 50%;
+        border: 1.5px solid rgba(13,148,136,0.12);
+        pointer-events: none;
+    }
+
+    /* Warm orb bottom-right */
     .sentree-hero::after {
         content: "";
         position: absolute;
-        inset: auto -5% -40% auto;
-        width: 280px;
-        height: 280px;
+        bottom: -80px; right: 8%;
+        width: 320px; height: 320px;
         border-radius: 50%;
-        background: radial-gradient(circle, rgba(180, 83, 9, 0.12), transparent 68%);
+        background: radial-gradient(circle, rgba(194,105,10,0.11), transparent 65%);
         pointer-events: none;
     }
 
     .sentree-kicker {
         display: inline-flex;
         align-items: center;
-        gap: 0.45rem;
-        padding: 0.35rem 0.7rem;
-        border-radius: 999px;
-        background: rgba(23, 52, 47, 0.08);
-        color: var(--sentree-accent);
-        font-size: 0.78rem;
+        gap: 0.4rem;
+        padding: 0.32rem 0.78rem 0.32rem 0.62rem;
+        border-radius: var(--radius-pill);
+        background: rgba(13,148,136,0.10);
+        border: 1px solid rgba(13,148,136,0.18);
+        color: var(--sentree-accent-dark);
+        font-size: 0.72rem;
         font-weight: 800;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.10em;
         text-transform: uppercase;
+    }
+    .sentree-kicker::before {
+        content: "";
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--sentree-accent);
+        display: inline-block;
+        animation: pulseGlow 2.4s ease-in-out infinite;
     }
 
     .sentree-hero h1 {
-        margin: 0.85rem 0 0.4rem 0;
-        font-size: 3rem;
-        line-height: 0.96;
-        max-width: 8.5ch;
+        margin: 0.9rem 0 0.5rem;
+        font-size: clamp(2.4rem, 4vw, 3.4rem);
+        line-height: 0.93;
+        font-family: "Fraunces", Georgia, serif;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        background: linear-gradient(135deg, #0d2a24 0%, #0f766e 55%, #0d2a24 100%);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: shimmer 6s linear infinite;
     }
 
     .sentree-hero p {
         margin: 0;
-        max-width: 54rem;
+        max-width: 52rem;
         color: var(--sentree-ink-soft);
-        font-size: 1rem;
+        font-size: 1.02rem;
+        line-height: 1.6;
+        font-weight: 400;
+    }
+
+    .sentree-hero-grid {
+        display: flex;
+        gap: 1.4rem;
+        align-items: flex-start;
+        justify-content: space-between;
+    }
+
+    .sentree-hero-copy { flex: 1 1 auto; min-width: 0; }
+
+    .sentree-hero-logo img {
+        width: 116px;
+        height: auto;
+        border-radius: 18px;
+        border: 1px solid rgba(15,118,110,0.16);
+        box-shadow: 0 8px 28px rgba(10,30,24,0.14);
+        background: rgba(255,255,255,0.85);
+        padding: 0.3rem;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .sentree-hero-logo img:hover {
+        transform: scale(1.04) rotate(-1deg);
+        box-shadow: 0 12px 36px rgba(10,30,24,0.20);
     }
 
     .sentree-badges {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.65rem;
-        margin-top: 1.1rem;
+        gap: 0.55rem;
+        margin-top: 1.2rem;
     }
 
     .sentree-badge {
-        padding: 0.48rem 0.72rem;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.72);
-        border: 1px solid rgba(23, 52, 47, 0.10);
-        color: #17342f;
-        font-size: 0.88rem;
-        font-weight: 600;
+        padding: 0.42rem 0.78rem;
+        border-radius: var(--radius-pill);
+        background: rgba(255,255,255,0.70);
+        border: 1px solid rgba(15,50,42,0.10);
+        color: #173c34;
+        font-size: 0.84rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        backdrop-filter: blur(6px);
+        transition: background 0.2s ease, transform 0.2s ease;
+    }
+    .sentree-badge:hover {
+        background: rgba(255,255,255,0.90);
+        transform: translateY(-1px);
     }
 
-    .sentree-section {
-        margin: 1.35rem 0 0.35rem 0;
-    }
+    /* ── Section header ──────────────────────────────────────────── */
+    .sentree-section { margin: 1.5rem 0 0.5rem; }
 
     .sentree-section-label {
         color: var(--sentree-accent);
-        font-size: 0.74rem;
-        font-weight: 800;
-        letter-spacing: 0.09em;
+        font-size: 0.70rem;
+        font-weight: 900;
+        letter-spacing: 0.13em;
         text-transform: uppercase;
-        margin-bottom: 0.3rem;
+        margin-bottom: 0.28rem;
+        font-family: "DM Mono", monospace;
     }
 
     .sentree-section h2 {
         margin: 0;
-        font-size: 2rem;
+        font-size: clamp(1.6rem, 2.5vw, 2.1rem);
+        font-family: "Fraunces", Georgia, serif;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1.05;
     }
 
     .sentree-section p {
-        margin: 0.28rem 0 0 0;
-        color: var(--sentree-ink-soft);
-        max-width: 55rem;
+        margin: 0.32rem 0 0;
+        color: var(--sentree-ink-muted);
+        max-width: 54rem;
+        font-size: 0.96rem;
+        line-height: 1.55;
     }
 
+    /* ── Cards ───────────────────────────────────────────────────── */
     .sentree-card {
-        padding: 1.1rem 1.15rem;
-        border-radius: 22px;
-        background: linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(242, 248, 244, 0.92));
-        border: 1px solid rgba(23, 52, 47, 0.10);
-        box-shadow: 0 14px 38px rgba(23, 52, 47, 0.08);
+        padding: 1.25rem 1.35rem;
+        border-radius: var(--radius-card);
+        background: linear-gradient(160deg, rgba(254,251,244,0.97) 0%, rgba(239,248,244,0.95) 100%);
+        border: 1px solid var(--sentree-card-border);
+        box-shadow: var(--shadow-card);
         margin-bottom: 1rem;
+        transition: box-shadow 0.25s ease, transform 0.25s ease;
+        position: relative;
+        overflow: hidden;
     }
+    .sentree-card::before {
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, var(--sentree-accent), var(--sentree-accent-warm), var(--sentree-accent));
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    .sentree-card:hover { box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
+    .sentree-card:hover::before { opacity: 1; }
 
     .sentree-card h3 {
         margin: 0;
-        font-size: 1.08rem;
-    }
-
-    .sentree-card p {
-        margin: 0.38rem 0 0 0;
-        color: var(--sentree-ink-soft);
-        font-size: 0.95rem;
-    }
-
-    .sentree-kpi {
-        padding: 1rem 1.1rem;
-        border-radius: 20px;
-        background: linear-gradient(180deg, rgba(255, 250, 241, 0.96), rgba(236, 245, 239, 0.93));
-        border: 1px solid rgba(23, 52, 47, 0.10);
-        box-shadow: 0 12px 32px rgba(23, 52, 47, 0.08);
-        min-height: 118px;
-    }
-
-    .sentree-kpi-label {
-        color: var(--sentree-ink-muted);
-        font-size: 0.76rem;
-        font-weight: 800;
-        letter-spacing: 0.07em;
-        text-transform: uppercase;
-    }
-
-    .sentree-kpi-value {
-        margin-top: 0.48rem;
-        color: #17342f;
-        font-size: 2rem;
-        font-weight: 800;
-        line-height: 1;
-    }
-
-    .sentree-kpi-sub {
-        margin-top: 0.42rem;
-        color: var(--sentree-ink-soft);
-        font-size: 0.92rem;
-    }
-
-    h1, h2, h3 {
-        color: #17342f;
+        font-size: 1.04rem;
+        font-weight: 700;
         letter-spacing: -0.02em;
     }
 
+    .sentree-card p {
+        margin: 0.4rem 0 0;
+        color: var(--sentree-ink-soft);
+        font-size: 0.94rem;
+        line-height: 1.55;
+    }
+
+    /* ── KPI cards ───────────────────────────────────────────────── */
+    .sentree-kpi {
+        padding: 1.2rem 1.3rem;
+        border-radius: var(--radius-card);
+        background: linear-gradient(150deg, rgba(255,250,241,0.98) 0%, rgba(233,246,240,0.95) 100%);
+        border: 1px solid var(--sentree-card-border);
+        box-shadow: var(--shadow-card);
+        min-height: 122px;
+        transition: box-shadow 0.25s ease, transform 0.25s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    .sentree-kpi::after {
+        content: "";
+        position: absolute;
+        bottom: -30px; right: -30px;
+        width: 90px; height: 90px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(13,148,136,0.10), transparent 70%);
+        pointer-events: none;
+    }
+    .sentree-kpi:hover { box-shadow: var(--shadow-card-hover); transform: translateY(-2px); }
+
+    .sentree-kpi-label {
+        color: var(--sentree-ink-muted);
+        font-size: 0.71rem;
+        font-weight: 800;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+        font-family: "DM Mono", monospace;
+    }
+
+    .sentree-kpi-value {
+        margin-top: 0.5rem;
+        color: #0f2a24;
+        font-size: 2.1rem;
+        font-weight: 900;
+        line-height: 1;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.03em;
+    }
+
+    .sentree-kpi-sub {
+        margin-top: 0.45rem;
+        color: var(--sentree-ink-muted);
+        font-size: 0.87rem;
+    }
+
+    /* ── Global type ─────────────────────────────────────────────── */
+    h1, h2, h3 {
+        color: #0f2a24;
+        letter-spacing: -0.025em;
+        font-family: "Fraunces", Georgia, serif;
+    }
+    h3 { font-family: "Cabinet Grotesk", system-ui, sans-serif; }
+
+    /* ── Sidebar ─────────────────────────────────────────────────── */
     section[data-testid="stSidebar"] > div {
         background: var(--sentree-sidebar-bg);
-        border-right: 1px solid rgba(244, 238, 223, 0.12);
+        border-right: 1px solid rgba(237,232,216,0.10);
     }
 
     section[data-testid="stSidebar"] h1,
@@ -244,25 +391,31 @@ st.markdown(
         font-weight: 700;
     }
 
+    /* ── Metric widgets ──────────────────────────────────────────── */
     div[data-testid="stMetric"] {
-        background: linear-gradient(180deg, var(--sentree-card-top), var(--sentree-card-bottom));
-        border: 1px solid rgba(23, 52, 47, 0.16);
-        border-radius: 18px;
-        padding: 0.85rem 1rem;
-        box-shadow: 0 14px 40px rgba(23, 52, 47, 0.10);
+        background: linear-gradient(150deg, var(--sentree-card-top), var(--sentree-card-bottom));
+        border: 1px solid rgba(15,50,42,0.12);
+        border-radius: 20px;
+        padding: 1rem 1.1rem;
+        box-shadow: var(--shadow-card);
+        transition: box-shadow 0.2s ease;
     }
+    div[data-testid="stMetric"]:hover { box-shadow: var(--shadow-card-hover); }
 
     div[data-testid="stMetricLabel"] p {
         color: var(--sentree-ink-muted) !important;
-        font-size: 0.82rem;
-        font-weight: 700;
-        letter-spacing: 0.02em;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.07em;
         text-transform: uppercase;
+        font-family: "DM Mono", monospace;
     }
 
     div[data-testid="stMetricValue"] {
-        color: #17342f !important;
-        font-weight: 800;
+        color: #0f2a24 !important;
+        font-weight: 900;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
     }
 
     div[data-testid="stMetricDelta"] {
@@ -270,36 +423,51 @@ st.markdown(
         font-weight: 700;
     }
 
-    div.stButton > button, div[data-testid="stFormSubmitButton"] button {
-        border-radius: 999px;
-        border: 1px solid rgba(23, 52, 47, 0.22);
-        background: #17342f;
-        color: #f8f4ea;
-        font-weight: 700;
-        box-shadow: 0 10px 24px rgba(23, 52, 47, 0.16);
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    div.stButton > button,
+    div[data-testid="stFormSubmitButton"] button {
+        border-radius: var(--radius-pill);
+        border: 1px solid rgba(15,50,42,0.20);
+        background: linear-gradient(135deg, #122920, #0f766e);
+        color: #f4eedc;
+        font-weight: 800;
+        font-family: "Cabinet Grotesk", system-ui, sans-serif;
+        letter-spacing: -0.01em;
+        box-shadow: 0 4px 12px rgba(13,118,110,0.22), 0 1px 3px rgba(0,0,0,0.10);
+        transition: all 0.22s ease;
     }
-
-    div.stButton > button:hover, div[data-testid="stFormSubmitButton"] button:hover {
-        background: var(--sentree-accent);
-        border-color: var(--sentree-accent);
-        color: #fffdf7;
+    div.stButton > button:hover,
+    div[data-testid="stFormSubmitButton"] button:hover {
+        background: linear-gradient(135deg, #0f766e, #0d9488);
+        border-color: rgba(13,148,136,0.35);
+        box-shadow: 0 6px 20px rgba(13,148,136,0.30), 0 2px 6px rgba(0,0,0,0.10);
+        transform: translateY(-1px);
     }
-
-    div.stButton > button p, div[data-testid="stFormSubmitButton"] button p {
+    div.stButton > button p,
+    div[data-testid="stFormSubmitButton"] button p {
         color: inherit !important;
-        font-weight: 700;
+        font-weight: 800;
     }
 
+    /* ── Inputs & selects ────────────────────────────────────────── */
     div[data-baseweb="select"] > div,
     div[data-baseweb="base-input"] {
-        background: rgba(255, 251, 245, 0.92);
-        border-color: rgba(23, 52, 47, 0.20);
-        color: #17342f;
+        background: rgba(252,249,242,0.94);
+        border-color: rgba(15,50,42,0.16) !important;
+        color: #0f2a24;
+        border-radius: 12px !important;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-baseweb="select"] > div:focus-within,
+    div[data-baseweb="base-input"]:focus-within {
+        border-color: rgba(13,148,136,0.45) !important;
+        box-shadow: 0 0 0 3px rgba(13,148,136,0.10);
     }
 
     div[data-baseweb="select"] span,
     div[data-baseweb="base-input"] input {
-        color: #17342f !important;
+        color: #0f2a24 !important;
+        font-family: "Cabinet Grotesk", system-ui, sans-serif;
     }
 
     div[data-testid="stWidgetLabel"] *,
@@ -307,101 +475,190 @@ st.markdown(
     .stSelectbox label,
     .stSlider label,
     .stTextInput label {
-        color: #23423c !important;
-        font-weight: 600;
+        color: #1a3d35 !important;
+        font-weight: 700;
+        letter-spacing: -0.01em;
     }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
     section[data-testid="stSidebar"] div[data-baseweb="base-input"] {
         background: var(--sentree-sidebar-field);
         border-color: var(--sentree-sidebar-border);
-        color: #18322d;
+        color: #0f2a24;
     }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] span,
     section[data-testid="stSidebar"] div[data-baseweb="base-input"] input {
-        color: #18322d !important;
+        color: #0f2a24 !important;
     }
 
     section[data-testid="stSidebar"] .sentree-card {
-        background: linear-gradient(180deg, rgba(255, 251, 245, 0.98), rgba(241, 247, 244, 0.95));
-        border-color: rgba(23, 52, 47, 0.14);
-        box-shadow: 0 12px 28px rgba(8, 18, 22, 0.18);
+        background: linear-gradient(160deg, rgba(255,251,245,0.99), rgba(238,247,244,0.97));
+        border-color: rgba(15,50,42,0.12);
+        box-shadow: 0 8px 24px rgba(8,18,22,0.16);
     }
 
-    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] .sentree-card h3 {
-        color: #17342f !important;
-    }
-
-    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] .sentree-card p {
-        color: #49615a !important;
-    }
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] .sentree-card h3 { color: #0f2a24 !important; }
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] .sentree-card p  { color: #3d5850 !important; }
 
     section[data-testid="stSidebar"] div.stButton > button {
-        background: rgba(244, 238, 223, 0.12);
-        border-color: rgba(244, 238, 223, 0.22);
+        background: rgba(237,232,216,0.10);
+        border-color: rgba(237,232,216,0.20);
         color: var(--sentree-sidebar-ink);
         box-shadow: none;
     }
-
     section[data-testid="stSidebar"] div.stButton > button:hover {
-        background: rgba(15, 118, 110, 0.35);
-        border-color: rgba(15, 118, 110, 0.45);
+        background: rgba(13,148,136,0.28);
+        border-color: rgba(13,148,136,0.40);
     }
 
     section[data-testid="stSidebar"] [data-baseweb="checkbox"] > div {
         color: var(--sentree-sidebar-ink);
     }
 
+    /* ── Slider ──────────────────────────────────────────────────── */
     div[data-testid="stSliderTickBarMin"],
-    div[data-testid="stSliderTickBarMax"] {
-        color: #42615a;
-    }
+    div[data-testid="stSliderTickBarMax"] { color: #4a6159; }
 
     div[data-baseweb="slider"] [role="slider"] {
         background: var(--sentree-accent);
         border-color: var(--sentree-accent);
+        box-shadow: 0 0 0 4px rgba(13,148,136,0.15);
     }
+    div[data-baseweb="slider"] > div > div { background: rgba(13,148,136,0.20); }
 
-    div[data-baseweb="slider"] > div > div {
-        background: rgba(15, 118, 110, 0.22);
-    }
-
+    /* ── Misc Streamlit elements ─────────────────────────────────── */
     div[data-testid="stMarkdownContainer"] p,
-    div[data-testid="stCaptionContainer"] {
-        color: var(--sentree-ink-soft);
-    }
+    div[data-testid="stCaptionContainer"] { color: var(--sentree-ink-soft); }
 
-    div[data-testid="stAlert"] {
-        border-radius: 16px;
-    }
+    div[data-testid="stAlert"] { border-radius: 16px; }
 
     div[data-testid="stExpander"] {
+        border-radius: 20px;
+        border: 1px solid var(--sentree-card-border);
+        background: rgba(252,249,242,0.82);
+        overflow: hidden;
+        transition: box-shadow 0.2s ease;
+    }
+    div[data-testid="stExpander"]:hover { box-shadow: 0 6px 20px rgba(10,30,24,0.08); }
+    div[data-testid="stExpander"] summary {
+        background: rgba(252,249,242,0.88);
+        font-weight: 700;
+    }
+
+    /* ── Tabs ────────────────────────────────────────────────────── */
+    button[kind="tab"] {
+        border-radius: var(--radius-pill);
+        border: 1px solid rgba(15,50,42,0.12);
+        background: rgba(252,249,242,0.88);
+        padding: 0.48rem 1.1rem;
+        font-weight: 700;
+        color: #224038;
+        font-family: "Cabinet Grotesk", system-ui, sans-serif;
+        letter-spacing: -0.01em;
+        box-shadow: 0 2px 8px rgba(10,30,24,0.05);
+        transition: all 0.2s ease;
+    }
+    button[kind="tab"]:hover:not([aria-selected="true"]) {
+        background: rgba(255,255,255,0.92);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(10,30,24,0.08);
+    }
+    button[kind="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, #0f2a24, #0f766e);
+        color: #f0ead8 !important;
+        border-color: transparent;
+        box-shadow: 0 8px 24px rgba(13,118,110,0.25), 0 2px 6px rgba(0,0,0,0.10);
+    }
+
+    /* ── Context bar ─────────────────────────────────────────────── */
+    .sentree-context {
+        margin: 0.6rem 0 1.1rem;
+        padding: 0.8rem 1rem;
+        border-radius: 16px;
+        background: linear-gradient(160deg, rgba(252,249,242,0.96), rgba(239,248,244,0.94));
+        border: 1px solid var(--sentree-card-border);
+        box-shadow: 0 6px 20px rgba(10,30,24,0.06);
+        color: #243b35;
+        font-size: 0.88rem;
+        font-family: "DM Mono", monospace;
+        letter-spacing: 0.01em;
+    }
+
+    /* ── Overview grid ───────────────────────────────────────────── */
+    .sentree-overview-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
+        margin: 0.5rem 0 1.1rem;
+    }
+
+    .sentree-overview-item {
         border-radius: 18px;
-        border: 1px solid rgba(23, 52, 47, 0.10);
-        background: rgba(255, 252, 246, 0.8);
+        border: 1px solid var(--sentree-card-border);
+        background: rgba(252,249,242,0.90);
+        padding: 1rem 1.1rem;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        position: relative;
         overflow: hidden;
     }
-
-    div[data-testid="stExpander"] summary {
-        background: rgba(255, 252, 246, 0.84);
+    .sentree-overview-item:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 28px rgba(10,30,24,0.10);
+    }
+    .sentree-overview-item::before {
+        content: attr(data-step);
+        position: absolute;
+        top: 0.6rem; right: 0.8rem;
+        font-size: 2.8rem;
+        font-weight: 900;
+        font-family: "Fraunces", Georgia, serif;
+        color: rgba(13,148,136,0.07);
+        line-height: 1;
+        pointer-events: none;
     }
 
-    button[kind="tab"] {
-        border-radius: 999px;
-        border: 1px solid rgba(23, 52, 47, 0.10);
-        background: rgba(255, 252, 246, 0.72);
-        padding: 0.4rem 0.95rem;
+    .sentree-overview-item strong {
+        display: block;
+        margin-bottom: 0.28rem;
+        color: #0f2a24;
+        font-weight: 800;
+        font-size: 0.96rem;
+        letter-spacing: -0.01em;
     }
 
-    button[kind="tab"][aria-selected="true"] {
-        background: #17342f;
-        color: #f8f4ea;
+    .sentree-overview-item span {
+        color: #3d5850;
+        font-size: 0.88rem;
+        line-height: 1.5;
     }
 
-    hr {
-        border-color: rgba(23, 52, 47, 0.08);
+    /* ── Reasoning items ─────────────────────────────────────────── */
+    .sentree-reasoning-item {
+        margin: 0.2rem 0 0.45rem;
+        padding: 0.7rem 0.85rem;
+        border-radius: 14px;
+        background: rgba(252,249,242,0.70);
+        border: 1px solid rgba(13,148,136,0.10);
+        border-left: 3px solid var(--sentree-accent);
+        transition: background 0.2s ease;
     }
+    .sentree-reasoning-item:hover { background: rgba(252,249,242,0.92); }
+
+    /* ── Divider ─────────────────────────────────────────────────── */
+    hr { border-color: rgba(15,50,42,0.08); }
+
+    /* ── Dataframe ───────────────────────────────────────────────── */
+    div[data-testid="stDataFrame"] {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--sentree-card-border);
+        box-shadow: var(--shadow-card);
+    }
+
+    /* ── Caption ─────────────────────────────────────────────────── */
+    small, .caption { color: var(--sentree-ink-muted); font-size: 0.82rem; }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -461,7 +718,6 @@ def kpi_card(label: str, value: str, subtitle: str) -> None:
 scenario = "SSP3-7.0 (High Emissions)"
 intervention = "Investor Mode"
 capital_allocation_m = int(st.session_state.get("capital_allocation_m", 50))
-capital_allocation = int(capital_allocation_m) * 1_000_000
 
 # --- Load results ---
 @st.cache_data
@@ -584,9 +840,6 @@ def _apply_capital_allocation(roi_data, capital_allocation):
         entry["impact_scale"] = impact_scale
         adjusted[key] = entry
     return adjusted
-
-
-roi_data_adjusted = _apply_capital_allocation(roi_data, capital_allocation)
 
 
 def _build_investor_rank_table(roi_data_adjusted: dict) -> pd.DataFrame:
@@ -789,11 +1042,21 @@ def build_training_figure(training, epoch_idx, show_edges=True, highlight_target
     p95_risk = training["p95_risk"]
     target = training["target"]
 
-    fig = plt.figure(figsize=(14, 7.2))
-    grid = fig.add_gridspec(2, 2, width_ratios=[1.75, 1], height_ratios=[1, 1], wspace=0.22, hspace=0.3)
-    ax_map = fig.add_subplot(grid[:, 0])
+    BG = "#f6f3ea"
+    fig = plt.figure(figsize=(14, 7.4), facecolor=BG)
+    grid = fig.add_gridspec(2, 2, width_ratios=[1.75, 1], height_ratios=[1, 1],
+                            wspace=0.26, hspace=0.34)
+    ax_map  = fig.add_subplot(grid[:, 0])
     ax_loss = fig.add_subplot(grid[0, 1])
     ax_risk = fig.add_subplot(grid[1, 1])
+
+    for ax in [ax_map, ax_loss, ax_risk]:
+        ax.set_facecolor(BG)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        for sp in ax.spines.values():
+            sp.set_edgecolor((15 / 255, 50 / 255, 42 / 255, 0.12))
+        ax.tick_params(colors="#4a6159", labelsize=9)
 
     if show_edges and training["edge_index"].size > 0:
         edge_index = training["edge_index"]
@@ -801,65 +1064,70 @@ def build_training_figure(training, epoch_idx, show_edges=True, highlight_target
             [(lons[src], lats[src]), (lons[dst], lats[dst])]
             for src, dst in zip(edge_index[0], edge_index[1])
         ]
-        edge_collection = LineCollection(segments, colors=(0.09, 0.2, 0.18, 0.08), linewidths=0.5)
+        edge_collection = LineCollection(segments, colors=(0.09, 0.22, 0.18, 0.06),
+                                         linewidths=0.45)
         ax_map.add_collection(edge_collection)
 
     scatter = ax_map.scatter(
-        lons,
-        lats,
-        c=pred,
-        s=14 + pred * 26,
-        cmap="RdYlGn_r",
-        vmin=0.0,
-        vmax=1.0,
-        alpha=0.9,
-        linewidths=0,
+        lons, lats,
+        c=pred, s=12 + pred * 24,
+        cmap="RdYlGn_r", vmin=0.0, vmax=1.0,
+        alpha=0.88, linewidths=0,
     )
 
     if highlight_targets:
         tail_mask = target >= training["tail_threshold"]
         ax_map.scatter(
-            lons[tail_mask],
-            lats[tail_mask],
-            s=44,
-            facecolors="none",
-            edgecolors="#17342f",
-            linewidths=0.9,
-            alpha=0.75,
+            lons[tail_mask], lats[tail_mask],
+            s=46, facecolors="none",
+            edgecolors="#0f2a24", linewidths=0.85, alpha=0.72,
         )
 
-    ax_map.set_title(f"Node Risk Field at Epoch {epoch_idx + 1}", loc="left", fontsize=13, fontweight="bold")
-    ax_map.set_xlabel("Longitude")
-    ax_map.set_ylabel("Latitude")
-    ax_map.set_facecolor("#fffdf7")
-    ax_map.grid(alpha=0.12)
-
-    cbar = fig.colorbar(scatter, ax=ax_map, fraction=0.035, pad=0.02)
-    cbar.set_label("Predicted systemic risk")
+    ax_map.set_title(f"Node Risk Field — Epoch {epoch_idx + 1}", loc="left",
+                     fontsize=12, fontweight="bold", color="#0f2a24", pad=8)
+    ax_map.set_xlabel("Longitude", color="#4a6159", fontsize=10)
+    ax_map.set_ylabel("Latitude",  color="#4a6159", fontsize=10)
+    ax_map.grid(alpha=0.08, linestyle="--", color="#0f2a24")
+    cbar = fig.colorbar(scatter, ax=ax_map, fraction=0.033, pad=0.02)
+    cbar.set_label("Predicted systemic risk", color="#4a6159", fontsize=9)
+    cbar.ax.tick_params(colors="#4a6159", labelsize=8)
 
     epochs = training["epochs"]
-    ax_loss.plot(epochs, loss, color="#0f766e", linewidth=2.2)
-    ax_loss.scatter([epoch_idx + 1], [loss[epoch_idx]], color="#ea580c", s=52, zorder=3)
-    ax_loss.axvline(epoch_idx + 1, color="#ea580c", linestyle="--", linewidth=1.1, alpha=0.7)
-    ax_loss.set_title("Optimization Progress", loc="left", fontsize=12, fontweight="bold")
-    ax_loss.set_xlabel("Epoch")
-    ax_loss.set_ylabel("Huber loss")
-    ax_loss.grid(alpha=0.18)
-    ax_loss.set_facecolor("#fffdf7")
+    ax_loss.plot(epochs, loss, color="#0d9488", linewidth=2.2,
+                 solid_capstyle="round")
+    ax_loss.fill_between(epochs, loss, alpha=0.08, color="#0d9488")
+    ax_loss.scatter([epoch_idx + 1], [loss[epoch_idx]],
+                    color="#c2690a", s=52, zorder=3, linewidths=0)
+    ax_loss.axvline(epoch_idx + 1, color="#c2690a", linestyle="--",
+                    linewidth=1.0, alpha=0.55)
+    ax_loss.set_title("Optimization Progress", loc="left", fontsize=11,
+                      fontweight="bold", color="#0f2a24", pad=6)
+    ax_loss.set_xlabel("Epoch", color="#4a6159", fontsize=9)
+    ax_loss.set_ylabel("Huber loss", color="#4a6159", fontsize=9)
+    ax_loss.grid(alpha=0.10, linestyle="--", color="#0f2a24")
 
-    ax_risk.plot(epochs, mean_risk, color="#2563eb", linewidth=2.2, label="Mean risk")
-    ax_risk.plot(epochs, p95_risk, color="#b91c1c", linewidth=2.2, label="95th pct risk")
-    ax_risk.scatter([epoch_idx + 1], [mean_risk[epoch_idx]], color="#2563eb", s=48, zorder=3)
-    ax_risk.scatter([epoch_idx + 1], [p95_risk[epoch_idx]], color="#b91c1c", s=48, zorder=3)
-    ax_risk.axvline(epoch_idx + 1, color="#ea580c", linestyle="--", linewidth=1.1, alpha=0.7)
-    ax_risk.set_title("Prediction Profile", loc="left", fontsize=12, fontweight="bold")
-    ax_risk.set_xlabel("Epoch")
-    ax_risk.set_ylabel("Risk score")
-    ax_risk.grid(alpha=0.18)
-    ax_risk.set_facecolor("#fffdf7")
-    ax_risk.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0)
+    ax_risk.plot(epochs, mean_risk, color="#2563eb", linewidth=2.2,
+                 label="Mean risk", solid_capstyle="round")
+    ax_risk.plot(epochs, p95_risk, color="#b91c1c", linewidth=2.2,
+                 label="95th pct", solid_capstyle="round")
+    ax_risk.fill_between(epochs, mean_risk, alpha=0.06, color="#2563eb")
+    ax_risk.fill_between(epochs, p95_risk, alpha=0.06, color="#b91c1c")
+    ax_risk.scatter([epoch_idx + 1], [mean_risk[epoch_idx]],
+                    color="#2563eb", s=44, zorder=3, linewidths=0)
+    ax_risk.scatter([epoch_idx + 1], [p95_risk[epoch_idx]],
+                    color="#b91c1c", s=44, zorder=3, linewidths=0)
+    ax_risk.axvline(epoch_idx + 1, color="#c2690a", linestyle="--",
+                    linewidth=1.0, alpha=0.55)
+    ax_risk.set_title("Prediction Profile", loc="left", fontsize=11,
+                      fontweight="bold", color="#0f2a24", pad=6)
+    ax_risk.set_xlabel("Epoch", color="#4a6159", fontsize=9)
+    ax_risk.set_ylabel("Risk score", color="#4a6159", fontsize=9)
+    ax_risk.grid(alpha=0.10, linestyle="--", color="#0f2a24")
+    ax_risk.legend(frameon=False, loc="upper left",
+                   bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0,
+                   fontsize=9, labelcolor="#0f2a24")
 
-    fig.patch.set_facecolor("#fffaf2")
+    fig.tight_layout(pad=1.6)
     return fig
 
 
@@ -894,26 +1162,45 @@ def render_training_frame(viz_placeholder, metrics_placeholder, training, epoch_
 
 def build_risk_timeseries_figure(ts, metric, intervention_key=None, intervention_name=None):
     years = np.array(ts["years"])
-    fig, ax = plt.subplots(figsize=(12.8, 4.6))
+    fig, ax = plt.subplots(figsize=(12.8, 4.8))
+    fig.patch.set_facecolor("#faf7f0")
+    ax.set_facecolor("#faf7f0")
 
-    series = [("Baseline", ts["baseline"][metric], "#17342f")]
+    palette = {"baseline": "#0f2a24", "intervention": "#0d9488", "fill": "#0d9488"}
+
+    series = [("Baseline", ts["baseline"][metric], palette["baseline"])]
     if intervention_key and intervention_key in ts:
         label = intervention_name or intervention_key.replace("_", " ").title()
-        series.append((label, ts[intervention_key][metric], "#0f766e"))
+        series.append((label, ts[intervention_key][metric], palette["intervention"]))
 
     for name, values, color in series:
         values_arr = np.array(values)
-        ax.plot(years, values_arr, linewidth=2.4, color=color, label=name)
-        ax.scatter([years[-1]], [values_arr[-1]], color=color, s=42, zorder=3)
+        ax.plot(years, values_arr, linewidth=2.6, color=color, label=name,
+                solid_capstyle="round", solid_joinstyle="round")
+        # Shaded band beneath each line
+        ax.fill_between(years, values_arr, alpha=0.07, color=color)
+        # Terminal dot
+        ax.scatter([years[-1]], [values_arr[-1]], color=color, s=52,
+                   zorder=4, linewidths=0)
 
-    ax.set_title("Systemic Risk Trajectory", loc="left", fontsize=14, fontweight="bold")
-    ax.set_xlabel("Year")
-    ax.set_ylabel("P95 RISK" if metric == "p95" else metric.upper())
-    ax.grid(alpha=0.16)
-    ax.legend(frameon=False, loc="upper left", ncols=len(series))
-    ax.set_facecolor("#fffdf7")
+    # Refline at 0.5 (halfway risk)
+    ax.axhline(0.5, color="#0d9488", linewidth=0.7, linestyle="--", alpha=0.28)
+
+    ax.set_title("Systemic Risk Trajectory", loc="left", fontsize=13,
+                 fontweight="bold", color="#0f2a24", pad=10)
+    ax.set_xlabel("Year", color="#4a6159", fontsize=11)
+    ax.set_ylabel("P95 RISK" if metric == "p95" else metric.upper(),
+                  color="#4a6159", fontsize=11)
+    ax.tick_params(colors="#4a6159", labelsize=10)
+    for spine in ax.spines.values():
+        spine.set_edgecolor((15 / 255, 50 / 255, 42 / 255, 0.12))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(alpha=0.10, linestyle="--", color="#0f2a24")
+    ax.legend(frameon=False, loc="upper left", ncols=len(series),
+              fontsize=11, labelcolor="#0f2a24")
     ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
-    fig.patch.set_facecolor("#fffaf2")
+    fig.tight_layout(pad=1.4)
     return fig
 
 
@@ -1020,32 +1307,39 @@ def render_math_view() -> None:
     )
 
 
-top_intervention = max(roi_data_adjusted.values(), key=lambda item: item.get("roi", 0.0))
 training_history_path = "outputs/roi/gnn_training_history.npz"
 training_status = "Training snapshots ready" if os.path.exists(training_history_path) else "Run pipeline to generate playback"
 video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
 
-summary_conf = _confidence_proxy(top_intervention)
-summary_tail = int(top_intervention.get("tail_risk_nodes_neutralized", 0))
-summary_name = top_intervention.get("name", "the selected intervention")
-summary_roi = float(top_intervention.get("roi", 0.0))
-summary_loss = _format_money_short(top_intervention.get("total_loss_avoided", 0.0))
-investor_rank = _build_investor_rank_table(roi_data_adjusted)
+logo_markup = ""
+logo_path = Path("data/sentree logo.jpg")
+if logo_path.exists():
+    logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+    logo_markup = (
+        "<div class='sentree-hero-logo'>"
+        f"<img src='data:image/jpeg;base64,{logo_b64}' alt='SenTree logo' />"
+        "</div>"
+    )
 
 st.markdown(
     f"""
     <div class="sentree-hero">
-        <div class="sentree-kicker">Climate adaptation intelligence</div>
-        <h1>SenTree</h1>
-        <p>
-            A decision cockpit for climate-risk propagation, resilience ROI, and intervention storytelling.
-            Explore where the graph neural network sees cascading risk, how mitigation strategies alter the map,
-            and which assets deserve immediate attention.
-        </p>
-        <div class="sentree-badges">
-            <div class="sentree-badge">Scenario: {scenario}</div>
-            <div class="sentree-badge">Focus: {intervention}</div>
-            <div class="sentree-badge">Region: SE Asia Coastal</div>
+        <div class="sentree-hero-grid">
+            <div class="sentree-hero-copy">
+                <div class="sentree-kicker">Climate adaptation intelligence</div>
+                <h1>SenTree</h1>
+                <p>
+                    A decision cockpit for climate-risk propagation, resilience ROI, and intervention storytelling.
+                    Explore where the graph neural network sees cascading risk, how mitigation strategies alter the map,
+                    and which assets deserve immediate attention.
+                </p>
+                <div class="sentree-badges">
+                    <div class="sentree-badge">Scenario: {scenario}</div>
+                    <div class="sentree-badge">Focus: {intervention}</div>
+                    <div class="sentree-badge">Region: SE Asia Coastal</div>
+                </div>
+            </div>
+            {logo_markup}
         </div>
     </div>
     """,
@@ -1058,7 +1352,7 @@ with control_cols[0]:
         "Total Capital Allocation (USD)",
         min_value=5,
         max_value=100,
-        value=capital_allocation_m,
+        value=int(st.session_state.get("capital_allocation_m", capital_allocation_m)),
         step=5,
         format="$%dM",
         key="capital_allocation_m",
@@ -1070,6 +1364,17 @@ with control_cols[1]:
 with control_cols[2]:
     st.markdown("**Horizon**")
     st.caption("2015-2100")
+
+# Recompute all investment-sensitive outputs from the current slider value.
+capital_allocation = int(capital_allocation_m) * 1_000_000
+roi_data_adjusted = _apply_capital_allocation(roi_data, capital_allocation)
+top_intervention = max(roi_data_adjusted.values(), key=lambda item: item.get("roi", 0.0))
+summary_conf = _confidence_proxy(top_intervention)
+summary_tail = int(top_intervention.get("tail_risk_nodes_neutralized", 0))
+summary_name = top_intervention.get("name", "the selected intervention")
+summary_roi = float(top_intervention.get("roi", 0.0))
+summary_loss = _format_money_short(top_intervention.get("total_loss_avoided", 0.0))
+investor_rank = _build_investor_rank_table(roi_data_adjusted)
 
 st.markdown(
     f"""
@@ -1097,13 +1402,18 @@ st.caption(
     f"Investor mode: metrics scale with ${capital_allocation/1e6:.0f}M total capital "
     "(sublinear, diminishing-returns assumption)."
 )
+st.markdown(
+    f"""
+    <div class="sentree-context">
+        <strong>Live Context:</strong> Capital {_format_money_short(capital_allocation)} • Scenario {scenario} • Region SE Asia Coastal •
+        Top strategy {top_intervention.get("name", "N/A")} ({top_intervention.get("roi", 0):.2f}x ROI)
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 overview_tab, recommendation_tab, evidence_tab, model_tab = st.tabs(
     ["Overview", "Recommendation", "Evidence", "Model"]
-)
-st.caption(
-    "Navigation: Overview = mission snapshot, Recommendation = investment ranking + comparison analytics, "
-    "Evidence = search/videos/risk/map, Model = GNN playback + math."
 )
 
 with recommendation_tab:
@@ -1126,6 +1436,25 @@ with overview_tab:
     surface_card(
         "What SenTree does",
         "It predicts tail-risk cascades with a GNN, simulates Koppen-aware interventions, and ranks them by resilience ROI, confidence, and avoided loss.",
+    )
+    st.markdown(
+        """
+        <div class="sentree-overview-grid">
+            <div class="sentree-overview-item">
+                <strong>1) Detect tail-risk</strong>
+                <span>The GNN spots nodes entering extreme regimes before losses cascade.</span>
+            </div>
+            <div class="sentree-overview-item">
+                <strong>2) Simulate interventions</strong>
+                <span>Koppen-aware intervention rules prevent biome-mismatch recommendations.</span>
+            </div>
+            <div class="sentree-overview-item">
+                <strong>3) Rank investable options</strong>
+                <span>Portfolio output combines ROI, confidence, and eligible footprint.</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 with recommendation_brief_tab:
@@ -1172,10 +1501,17 @@ with recommendation_brief_tab:
             top_three_reasons = investor_rank.head(3)
             for _, row in top_three_reasons.iterrows():
                 st.markdown(
-                    f"**{row['Intervention']}** | Score {row['Investor Score']:.2f} | "
-                    f"Confidence {row['Confidence (%)']:.0f}% | Tail-risk nodes neutralized: {int(row['Tail-Risk Nodes'])}"
+                    f"<div class='sentree-reasoning-item'>"
+                    f"<p style='margin:0.02rem 0 0.02rem 0;'>"
+                    f"<strong>{row['Intervention']}</strong> | "
+                    f"Score {row['Investor Score']:.2f} | "
+                    f"Confidence {row['Confidence (%)']:.0f}% | "
+                    f"Tail-risk nodes neutralized: {int(row['Tail-Risk Nodes'])}</p>"
+                    f"<p style='margin:0; color:#111111; font-weight:400;'>"
+                    f"Climate fit: {row['Climate Fit']}</p>"
+                    f"</div>",
+                    unsafe_allow_html=True,
                 )
-                st.caption(f"Climate fit: {row['Climate Fit']}")
 
         with brief_cols[1]:
             strategy = st.selectbox(
@@ -1663,6 +1999,26 @@ with model_math_tab:
     render_math_view()
 
 # --- Footer ---
-st.divider()
-st.caption('SenTree - Resilience ROI Dashboard | ML@Purdue Catapult Hackathon')
-
+st.markdown("""
+<div style="
+    margin-top:2.5rem;
+    padding:1.1rem 1.4rem;
+    border-radius:18px;
+    background:linear-gradient(135deg,rgba(15,42,36,0.06),rgba(13,148,136,0.06));
+    border:1px solid rgba(15,50,42,0.08);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    font-size:0.82rem;
+    color:#4a6159;
+    font-family:'DM Mono',monospace;
+    letter-spacing:0.01em;
+">
+    <span>SenTree — Resilience ROI Dashboard</span>
+    <span style="color:rgba(74,97,89,0.5)">|</span>
+    <span>ML@Purdue Catapult Hackathon</span>
+    <span style="color:rgba(74,97,89,0.5)">|</span>
+    <span>SE Asia · SSP3-7.0 · 2015–2100</span>
+</div>
+""", unsafe_allow_html=True)

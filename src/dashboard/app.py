@@ -518,9 +518,6 @@ def load_opportunity_map():
 
 
 roi_data = load_roi_data()
-ts = load_risk_timeseries()
-training = load_training_history()
-opportunity = load_opportunity_map()
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -804,7 +801,8 @@ def build_risk_timeseries_figure(ts, metric):
 
 
 top_intervention = max(roi_data.values(), key=lambda item: item.get("roi", 0.0))
-training_status = "Training snapshots ready" if training is not None else "Run pipeline to generate playback"
+training_history_path = "outputs/roi/gnn_training_history.npz"
+training_status = "Training snapshots ready" if os.path.exists(training_history_path) else "Run pipeline to generate playback"
 video_count = len([f for f in os.listdir('outputs/videos') if f.endswith('.mp4')]) if os.path.exists('outputs/videos') else 0
 
 st.markdown(
@@ -834,135 +832,149 @@ with hero_cols[0]:
 with hero_cols[1]:
     kpi_card("Loss Avoided", f"${top_intervention.get('total_loss_avoided', 0)/1e9:.1f}B", "Top intervention impact")
 with hero_cols[2]:
-    kpi_card("Training Epochs", str(int(len(training["epochs"])) if training is not None else 0), "Epoch playback depth")
+    kpi_card("Playback", "Ready" if os.path.exists(training_history_path) else "Missing", "Training view availability")
 with hero_cols[3]:
     kpi_card("Rendered Videos", str(video_count), "Simulation clips available")
 
-section_header(
-    "Discover",
-    "Search the simulation library",
-    "Use natural language to find the most relevant intervention videos, then inspect the ROI metrics that support each result.",
+active_view = st.radio(
+    "View",
+    ["Dashboard", "GNN Playback"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="sentree_view",
 )
-search_cols = st.columns([3.2, 1])
-with search_cols[0]:
-    query = st.text_input(
-        'Search simulations',
-        placeholder='e.g., "Show where mangroves prevent collapse"',
-        key='search_query'
+
+if active_view == "Dashboard":
+    section_header(
+        "Discover",
+        "Search the simulation library",
+        "Use natural language to find the most relevant intervention videos, then inspect the ROI metrics that support each result.",
     )
-with search_cols[1]:
-    search_btn = st.button('Search', type='primary', use_container_width=True)
-
-# --- Search Results ---
-if search_btn and query:
-    surface_card("Search Results", "Ranked video matches using vector search and intervention metadata.")
-
-    try:
-        from src.embedding.vectordb import VideoSearchDB
-        db = VideoSearchDB()
-
-        if db.count() > 0:
-            results = db.query(query, n_results=3)
-
-            for i, (vid_id, metadata, distance) in enumerate(zip(
-                results['ids'][0], results['metadatas'][0], results['distances'][0]
-            )):
-                similarity = 1 - distance
-                with st.expander(f'Result {i+1}: {metadata.get("title", vid_id)} — Relevance: {similarity:.1%}', expanded=(i == 0)):
-                    video_path = metadata.get('video_path', f'outputs/videos/{vid_id}.mp4')
-                    if os.path.exists(video_path):
-                        _show_video(video_path)
-
-                    c1, c2, c3 = st.columns(3)
-                    roi_key = metadata.get('intervention_key', '')
-                    if roi_key in roi_data:
-                        r = roi_data[roi_key]
-                        c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
-                        c2.metric('Loss Avoided', f"${r['total_loss_avoided']/1e9:.1f}B")
-                        c3.metric('Risk Reduction', f"{r['mean_risk_reduction']:.1%}")
-
-                    if metadata.get('has_tail_risk'):
-                        st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
-        else:
-            st.info('No videos indexed yet. Run `python scripts/index_videos.py` first.')
-
-    except Exception as e:
-        st.error(f'Search error: {e}')
-        st.info('Showing demo results instead.')
-
-# --- Metrics Dashboard ---
-section_header(
-    "Compare",
-    "Intervention comparison",
-    "Read the payoff of each resilience strategy across ROI, avoided loss, and risk reduction before drilling into the training playback.",
-)
-
-cols = st.columns(len(roi_data))
-for i, (key, data) in enumerate(roi_data.items()):
-    with cols[i]:
-        surface_card(
-            data['name'],
-            "Financial and systemic impact snapshot for the currently indexed intervention pathway.",
+    search_cols = st.columns([3.2, 1])
+    with search_cols[0]:
+        query = st.text_input(
+            'Search simulations',
+            placeholder='e.g., "Show where mangroves prevent collapse"',
+            key='search_query'
         )
-        st.metric('Resilience ROI', f"{data['roi']:.2f}x",
-                   help=f"Range: {data.get('roi_lower', 0):.2f} - {data.get('roi_upper', 0):.2f}")
-        st.metric('Total Loss Avoided', f"${data.get('total_loss_avoided', 0)/1e9:.1f}B")
-        st.metric('Mean Risk Reduction', f"{data.get('mean_risk_reduction', 0):.1%}")
+    with search_cols[1]:
+        search_btn = st.button('Search', type='primary', use_container_width=True)
 
-        tail_count = data.get('tail_risk_nodes_neutralized', 0)
-        if tail_count > 0:
-            st.error(f'Tail-Risk Nodes Neutralized: {tail_count}')
+if active_view == "Dashboard":
+    # --- Search Results ---
+    if search_btn and query:
+        surface_card("Search Results", "Ranked video matches using vector search and intervention metadata.")
 
-# --- GNN Training Animation ---
-section_header(
-    "Playback",
-    "Interactive GNN training playback",
-    "Scrub through epochs to see how node-level risk estimates stabilize and how the optimizer reshapes the graph-wide profile.",
-)
+        try:
+            from src.embedding.vectordb import VideoSearchDB
+            db = VideoSearchDB()
 
-if training is None:
-    st.info("Training history not found yet. Re-run `python scripts/run_pipeline.py` to generate `outputs/roi/gnn_training_history.npz`.")
-else:
-    total_epochs = int(len(training["epochs"]))
-    if "training_epoch_idx" not in st.session_state:
-        st.session_state.training_epoch_idx = total_epochs - 1
-    st.session_state.training_epoch_idx = min(max(int(st.session_state.training_epoch_idx), 0), total_epochs - 1)
+            if db.count() > 0:
+                results = db.query(query, n_results=3)
 
-    control_cols = st.columns([4, 1, 1, 1.3, 1.3])
-    epoch_selected = control_cols[0].slider(
-        "Epoch",
-        min_value=1,
-        max_value=total_epochs,
-        value=st.session_state.training_epoch_idx + 1,
+                for i, (vid_id, metadata, distance) in enumerate(zip(
+                    results['ids'][0], results['metadatas'][0], results['distances'][0]
+                )):
+                    similarity = 1 - distance
+                    with st.expander(f'Result {i+1}: {metadata.get("title", vid_id)} — Relevance: {similarity:.1%}', expanded=(i == 0)):
+                        video_path = metadata.get('video_path', f'outputs/videos/{vid_id}.mp4')
+                        if os.path.exists(video_path):
+                            _show_video(video_path)
+
+                        c1, c2, c3 = st.columns(3)
+                        roi_key = metadata.get('intervention_key', '')
+                        if roi_key in roi_data:
+                            r = roi_data[roi_key]
+                            c1.metric('ROI', f"{r['roi']:.2f}x", f"+/-{r.get('u_precip', 0.5):.2f}")
+                            c2.metric('Loss Avoided', f"${r['total_loss_avoided']/1e9:.1f}B")
+                            c3.metric('Risk Reduction', f"{r['mean_risk_reduction']:.1%}")
+
+                        if metadata.get('has_tail_risk'):
+                            st.warning(f"Tail-Risk Nodes Detected: {metadata.get('tail_risk_count', 'N/A')}")
+            else:
+                st.info('No videos indexed yet. Run `python scripts/index_videos.py` first.')
+
+        except Exception as e:
+            st.error(f'Search error: {e}')
+            st.info('Showing demo results instead.')
+
+    # --- Metrics Dashboard ---
+    section_header(
+        "Compare",
+        "Intervention comparison",
+        "Read the payoff of each resilience strategy across ROI, avoided loss, and risk reduction before drilling into the training playback.",
     )
-    play_btn = control_cols[1].button("Play", use_container_width=True)
-    reset_btn = control_cols[2].button("Reset", use_container_width=True)
-    playback_speed = control_cols[3].selectbox("Speed", ["Slow", "Medium", "Fast"], index=1)
-    show_edges = control_cols[4].checkbox("Show graph", value=True)
-    highlight_targets = st.checkbox("Highlight hardest tail-risk targets", value=True)
 
-    if reset_btn:
-        st.session_state.training_epoch_idx = 0
-    else:
-        st.session_state.training_epoch_idx = epoch_selected - 1
-
-    speed_seconds = {"Slow": 0.55, "Medium": 0.22, "Fast": 0.08}[playback_speed]
-    metrics_placeholder = st.empty()
-    viz_placeholder = st.empty()
-
-    if play_btn:
-        for frame_idx in range(st.session_state.training_epoch_idx, total_epochs):
-            st.session_state.training_epoch_idx = frame_idx
-            render_training_frame(
-                viz_placeholder,
-                metrics_placeholder,
-                training,
-                frame_idx,
-                show_edges=show_edges,
-                highlight_targets=highlight_targets,
+    cols = st.columns(len(roi_data))
+    for i, (key, data) in enumerate(roi_data.items()):
+        with cols[i]:
+            surface_card(
+                data['name'],
+                "Financial and systemic impact snapshot for the currently indexed intervention pathway.",
             )
-            time.sleep(speed_seconds)
+            st.metric('Resilience ROI', f"{data['roi']:.2f}x",
+                       help=f"Range: {data.get('roi_lower', 0):.2f} - {data.get('roi_upper', 0):.2f}")
+            st.metric('Total Loss Avoided', f"${data.get('total_loss_avoided', 0)/1e9:.1f}B")
+            st.metric('Mean Risk Reduction', f"{data.get('mean_risk_reduction', 0):.1%}")
+
+            tail_count = data.get('tail_risk_nodes_neutralized', 0)
+            if tail_count > 0:
+                st.error(f'Tail-Risk Nodes Neutralized: {tail_count}')
+
+if active_view == "GNN Playback":
+    training = load_training_history()
+
+    # --- GNN Training Animation ---
+    section_header(
+        "Playback",
+        "Interactive GNN training playback",
+        "Scrub through epochs to see how node-level risk estimates stabilize and how the optimizer reshapes the graph-wide profile.",
+    )
+
+    if training is None:
+        st.info("Training history not found yet. Re-run `python scripts/run_pipeline.py` to generate `outputs/roi/gnn_training_history.npz`.")
     else:
+        total_epochs = int(len(training["epochs"]))
+        if "training_epoch_idx" not in st.session_state:
+            st.session_state.training_epoch_idx = total_epochs - 1
+        if "training_playing" not in st.session_state:
+            st.session_state.training_playing = False
+        st.session_state.training_epoch_idx = min(max(int(st.session_state.training_epoch_idx), 0), total_epochs - 1)
+
+        control_cols = st.columns([4, 1, 1, 1, 1.2, 1.2])
+        epoch_selected = control_cols[0].slider(
+            "Epoch",
+            min_value=1,
+            max_value=total_epochs,
+            value=st.session_state.training_epoch_idx + 1,
+            disabled=st.session_state.training_playing,
+            key="training_epoch_slider",
+        )
+        play_btn = control_cols[1].button(
+            "Resume" if st.session_state.training_playing else "Play",
+            use_container_width=True,
+            key="training_play_btn",
+        )
+        pause_btn = control_cols[2].button("Pause", use_container_width=True, key="training_pause_btn")
+        reset_btn = control_cols[3].button("Reset", use_container_width=True, key="training_reset_btn")
+        playback_speed = control_cols[4].selectbox("Speed", ["Slow", "Medium", "Fast"], index=1, key="training_speed")
+        show_edges = control_cols[5].checkbox("Show graph", value=True, key="training_show_graph")
+        highlight_targets = st.checkbox("Highlight hardest tail-risk targets", value=True)
+
+        if play_btn:
+            st.session_state.training_playing = True
+        if pause_btn:
+            st.session_state.training_playing = False
+        if reset_btn:
+            st.session_state.training_epoch_idx = 0
+            st.session_state.training_playing = False
+        elif not st.session_state.training_playing:
+            st.session_state.training_epoch_idx = epoch_selected - 1
+
+        speed_seconds = {"Slow": 0.18, "Medium": 0.07, "Fast": 0.02}[playback_speed]
+        metrics_placeholder = st.empty()
+        viz_placeholder = st.empty()
+
         render_training_frame(
             viz_placeholder,
             metrics_placeholder,
@@ -972,39 +984,51 @@ else:
             highlight_targets=highlight_targets,
         )
 
-# --- Video Display ---
-section_header(
-    "Watch",
-    "Simulation videos",
-    "Review the rendered outputs that feed the search index and communicate the intervention story visually.",
-)
+        if st.session_state.training_playing:
+            if st.session_state.training_epoch_idx >= total_epochs - 1:
+                st.session_state.training_playing = False
+            else:
+                time.sleep(speed_seconds)
+                st.session_state.training_epoch_idx += 1
+                st.rerun()
 
-video_dir = 'outputs/videos'
-if os.path.exists(video_dir):
-    videos = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
-    if videos:
-        tabs = st.tabs([v.replace('.mp4', '').replace('_', ' ').title() for v in videos])
-        for tab, vid in zip(tabs, videos):
-            with tab:
-                _show_video(os.path.join(video_dir, vid))
+if active_view == "Dashboard":
+    ts = load_risk_timeseries()
+    opportunity = load_opportunity_map()
+
+    # --- Video Display ---
+    section_header(
+        "Watch",
+        "Simulation videos",
+        "Review the rendered outputs that feed the search index and communicate the intervention story visually.",
+    )
+
+    video_dir = 'outputs/videos'
+    if os.path.exists(video_dir):
+        videos = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
+        if videos:
+            tabs = st.tabs([v.replace('.mp4', '').replace('_', ' ').title() for v in videos])
+            for tab, vid in zip(tabs, videos):
+                with tab:
+                    _show_video(os.path.join(video_dir, vid))
+        else:
+            st.info('No videos generated yet. Run `python scripts/run_pipeline.py`.')
     else:
-        st.info('No videos generated yet. Run `python scripts/run_pipeline.py`.')
-else:
-    st.info('Output directory not found. Run the pipeline first.')
+        st.info('Output directory not found. Run the pipeline first.')
 
-# --- Math & Methodology Tab ---
-st.divider()
-section_header(
-    "Explain",
-    "Technical deep-dive",
-    "Inspect the mathematical assumptions behind tail-risk escalation, ROI estimation, and the graph model itself.",
-)
+    # --- Math & Methodology Tab ---
+    st.divider()
+    section_header(
+        "Explain",
+        "Technical deep-dive",
+        "Inspect the mathematical assumptions behind tail-risk escalation, ROI estimation, and the graph model itself.",
+    )
 
-math_tab, playground_tab = st.tabs(['📐 Mathematical Foundations', '🎮 Interactive Playground'])
+    math_tab, playground_tab = st.tabs(['📐 Mathematical Foundations', '🎮 Interactive Playground'])
 
-with math_tab:
-    st.subheader('1. Tail-Risk Escalation (Gurjar & Camp 2026)')
-    st.markdown(r"""
+    with math_tab:
+        st.subheader('1. Tail-Risk Escalation (Gurjar & Camp 2026)')
+        st.markdown(r"""
     The tail-risk engine identifies nodes where climate volatility and momentum intersect to create "regime shifts."
     
     **A. EWMA Smoothing (Intensity):**
@@ -1037,8 +1061,8 @@ with math_tab:
     """)
 
     
-    st.subheader('2. Resilience ROI & Economic Exposure (Ito 2020)')
-    st.markdown(r"""
+        st.subheader('2. Resilience ROI & Economic Exposure (Ito 2020)')
+        st.markdown(r"""
     **Avoided Damage Potential (The "Green Shades"):**
     The green shades on our map represent the **Resilience Opportunity Index (ROI)**, which is the potential damage avoided by an intervention.
     
@@ -1057,151 +1081,151 @@ with math_tab:
     $$U_{total} = \\sqrt{U_{precip}^2 + U_{model}^2 + U_{scenario}^2}$$
     """)
 
-    st.subheader('3. GNN Risk Architecture')
-    st.markdown(r"""
+        st.subheader('3. GNN Risk Architecture')
+        st.markdown(r"""
     Our GNN uses a **Graph Attention Network (GAT)** to propagate risk through geographic and economic links:
     $$h_i^{(l+1)} = \\sigma\left( \sum_{j \in \\mathcal{N}(i)} \\alpha_{ij} \mathbf{W} h_j^{(l)} \\right)$$
     where attention $\\alpha_{ij}$ is computed based on distance and feature similarity.
     """)
 
-with playground_tab:
-    st.subheader('Risk Simulation Playground')
-    st.markdown('Adjust parameters to see how they impact the ROI calculation logic.')
-    
-    col_p1, col_p2 = st.columns(2)
-    with col_p1:
-        p_alpha = st.slider('EWMA Decay ($\\alpha$)', 0.05, 0.95, 0.30)
-        p_discount = st.slider('Discount Rate ($r$)', 0.01, 0.15, 0.05)
-    with col_p2:
-        p_exposure = st.slider('Economic Exposure Scaling', 0.5, 5.0, 1.0)
-        p_threshold = st.slider('Tail-Risk Percentile', 80, 99, 95)
-    
-    # Mock calculation for playground
-    base_val = 100.0
-    reduction = 15.0 * p_exposure
-    discounted_val = sum([reduction / (1 + p_discount)**t for t in range(10)])
-    
-    st.info(f"**Theoretical Outcome:** An intervention reducing risk by {reduction:.1f}% would yield a total discounted loss avoidance of **${discounted_val:.2f}B** over 10 years.")
-    
-    st.markdown("""
+    with playground_tab:
+        st.subheader('Risk Simulation Playground')
+        st.markdown('Adjust parameters to see how they impact the ROI calculation logic.')
+        
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            p_alpha = st.slider('EWMA Decay ($\\alpha$)', 0.05, 0.95, 0.30)
+            p_discount = st.slider('Discount Rate ($r$)', 0.01, 0.15, 0.05)
+        with col_p2:
+            p_exposure = st.slider('Economic Exposure Scaling', 0.5, 5.0, 1.0)
+            p_threshold = st.slider('Tail-Risk Percentile', 80, 99, 95)
+        
+        # Mock calculation for playground
+        base_val = 100.0
+        reduction = 15.0 * p_exposure
+        discounted_val = sum([reduction / (1 + p_discount)**t for t in range(10)])
+        
+        st.info(f"**Theoretical Outcome:** An intervention reducing risk by {reduction:.1f}% would yield a total discounted loss avoidance of **${discounted_val:.2f}B** over 10 years.")
+        
+        st.markdown("""
     **Statistical Implications:**
     *   **Higher $\\alpha$:** Makes the system more sensitive to recent shocks (higher volatility).
     *   **Lower $r$:** Increases the present value of future resilience (favoring long-term projects like Mangroves).
     *   **Higher Threshold:** Focuses only on the most extreme "black swan" events.
     """)
 
-# --- Quantitative Risk Chart ---
-section_header(
-    "Monitor",
-    "Risk over time",
-    "Track how baseline and intervention pathways diverge across the full simulation horizon.",
-)
-if ts is None:
-    st.info("Risk time series not found yet. Re-run the pipeline to generate `outputs/roi/risk_timeseries.json`.")
-else:
-    metric = st.selectbox("Metric", ["mean", "p95", "max"], index=0)
-    fig = build_risk_timeseries_figure(ts, metric)
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
+    # --- Quantitative Risk Chart ---
+    section_header(
+        "Monitor",
+        "Risk over time",
+        "Track how baseline and intervention pathways diverge across the full simulation horizon.",
+    )
+    if ts is None:
+        st.info("Risk time series not found yet. Re-run the pipeline to generate `outputs/roi/risk_timeseries.json`.")
+    else:
+        metric = st.selectbox("Metric", ["mean", "p95", "max"], index=0)
+        fig = build_risk_timeseries_figure(ts, metric)
+        st.pyplot(fig, use_container_width=True)
+        plt.close(fig)
 
-# --- Tail Risk Map ---
-section_header(
-    "Locate",
-    "Tail-risk escalation map",
-    "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model’s extreme-regime threshold.",
-)
-if opportunity is not None:
-    st.markdown("**Interactive 3D Opportunity Overlay** (hover any cell to see a real-world label).")
-    try:
-        import pydeck as pdk
+    # --- Tail Risk Map ---
+    section_header(
+        "Locate",
+        "Tail-risk escalation map",
+        "Scan the geography of exposure and opportunity. Red overlays indicate nodes exceeding the model’s extreme-regime threshold.",
+    )
+    if opportunity is not None:
+        st.markdown("**Interactive 3D Opportunity Overlay** (hover any cell to see a real-world label).")
+        try:
+            import pydeck as pdk
 
-        df_pts, (vmin, vmax) = _opportunity_points(opportunity)
+            df_pts, (vmin, vmax) = _opportunity_points(opportunity)
 
-        with st.expander("Map debug (lat/lon ranges)"):
-            lats_dbg = np.asarray(opportunity["lats"], dtype=np.float64)
-            lons_raw_dbg = np.asarray(opportunity["lons"], dtype=np.float64)
-            lons_dbg = _wrap_lon_180(lons_raw_dbg)
-            st.write(
-                {
-                    "lat_min": float(np.nanmin(lats_dbg)),
-                    "lat_max": float(np.nanmax(lats_dbg)),
-                    "lon_min_raw": float(np.nanmin(lons_raw_dbg)),
-                    "lon_max_raw": float(np.nanmax(lons_raw_dbg)),
-                    "lon_min_wrapped": float(np.nanmin(lons_dbg)),
-                    "lon_max_wrapped": float(np.nanmax(lons_dbg)),
-                    "n_points": int(len(df_pts)),
-                }
+            with st.expander("Map debug (lat/lon ranges)"):
+                lats_dbg = np.asarray(opportunity["lats"], dtype=np.float64)
+                lons_raw_dbg = np.asarray(opportunity["lons"], dtype=np.float64)
+                lons_dbg = _wrap_lon_180(lons_raw_dbg)
+                st.write(
+                    {
+                        "lat_min": float(np.nanmin(lats_dbg)),
+                        "lat_max": float(np.nanmax(lats_dbg)),
+                        "lon_min_raw": float(np.nanmin(lons_raw_dbg)),
+                        "lon_max_raw": float(np.nanmax(lons_raw_dbg)),
+                        "lon_min_wrapped": float(np.nanmin(lons_dbg)),
+                        "lon_max_wrapped": float(np.nanmax(lons_dbg)),
+                        "n_points": int(len(df_pts)),
+                    }
+                )
+
+            # Optional downsample for performance if needed.
+            # 16k points (global coarsen=4) is fine; only downsample when extremely large.
+            max_points = 50_000
+            if len(df_pts) > max_points:
+                df_pts = df_pts.sample(max_points, random_state=0)
+
+            lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
+            lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
+            zoom = _suggest_pydeck_zoom(lat_span, lon_span)
+            pitch = 0 if zoom <= 2.2 else 50
+
+            view = pdk.ViewState(
+                latitude=float(df_pts["lat"].median()),
+                longitude=float(df_pts["lon"].median()),
+                zoom=zoom,
+                pitch=pitch,
             )
 
-        # Optional downsample for performance if needed.
-        # 16k points (global coarsen=4) is fine; only downsample when extremely large.
-        max_points = 50_000
-        if len(df_pts) > max_points:
-            df_pts = df_pts.sample(max_points, random_state=0)
-
-        lat_span = float(df_pts["lat"].max() - df_pts["lat"].min())
-        lon_span = float(df_pts["lon"].max() - df_pts["lon"].min())
-        zoom = _suggest_pydeck_zoom(lat_span, lon_span)
-        pitch = 0 if zoom <= 2.2 else 50
-
-        view = pdk.ViewState(
-            latitude=float(df_pts["lat"].median()),
-            longitude=float(df_pts["lon"].median()),
-            zoom=zoom,
-            pitch=pitch,
-        )
-
-        # Grid cells (3D extruded)
-        cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
-        elevation_scale = 4000.0  # tune for visibility
-        layer_cells = pdk.Layer(
-            "GridCellLayer",
-            data=df_pts,
-            get_position=["lon", "lat"],
-            get_elevation="value",
-            elevation_scale=elevation_scale,
-            cell_size=cell_size_m,
-            extruded=True,
-            pickable=True,
-            get_fill_color="color",
-        )
-
-        # Tail-risk flags (red dots overlaid)
-        flagged = df_pts[df_pts["tail_flag"]].copy()
-        layer_flags = pdk.Layer(
-            "ScatterplotLayer",
-            data=flagged,
-            get_position=["lon", "lat"],
-            get_radius=max(10_000, int(round(0.45 * cell_size_m))),
-            get_fill_color=[230, 30, 30, 190],
-            pickable=True,
-        )
-
-        tooltip = {
-            "text": (
-                "Lon: {lon}\nLat: {lat}\n"
-                "Avoided damage potential: {value}\n"
-                "Tail-risk flagged: {tail_flag}\n"
-                "Nearest: {nearest_city} (~{nearest_km} km)"
+            # Grid cells (3D extruded)
+            cell_size_m = _approx_cell_size_m(opportunity["lats"], opportunity["lons"])
+            elevation_scale = 4000.0  # tune for visibility
+            layer_cells = pdk.Layer(
+                "GridCellLayer",
+                data=df_pts,
+                get_position=["lon", "lat"],
+                get_elevation="value",
+                elevation_scale=elevation_scale,
+                cell_size=cell_size_m,
+                extruded=True,
+                pickable=True,
+                get_fill_color="color",
             )
-        }
 
-        deck = pdk.Deck(
-            layers=[layer_cells, layer_flags],
-            initial_view_state=view,
-            tooltip=tooltip,
-            map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-        )
-        st.pydeck_chart(deck, width='stretch')
-        st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
-    except Exception as e:
-        st.info(f"Interactive map unavailable ({e}). Showing static map below.")
+            # Tail-risk flags (red dots overlaid)
+            flagged = df_pts[df_pts["tail_flag"]].copy()
+            layer_flags = pdk.Layer(
+                "ScatterplotLayer",
+                data=flagged,
+                get_position=["lon", "lat"],
+                get_radius=max(10_000, int(round(0.45 * cell_size_m))),
+                get_fill_color=[230, 30, 30, 190],
+                pickable=True,
+            )
 
-tail_risk_img = 'outputs/tail_risk_map.png'
-if os.path.exists(tail_risk_img):
-    st.image(tail_risk_img, width='stretch')
-else:
-    st.info('Tail-risk map not generated yet.')
+            tooltip = {
+                "text": (
+                    "Lon: {lon}\nLat: {lat}\n"
+                    "Avoided damage potential: {value}\n"
+                    "Tail-risk flagged: {tail_flag}\n"
+                    "Nearest: {nearest_city} (~{nearest_km} km)"
+                )
+            }
+
+            deck = pdk.Deck(
+                layers=[layer_cells, layer_flags],
+                initial_view_state=view,
+                tooltip=tooltip,
+                map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+            )
+            st.pydeck_chart(deck, width='stretch')
+            st.caption(f"Color scale uses min/max of the opportunity grid: vmin={vmin:.4f}, vmax={vmax:.4f}.")
+        except Exception as e:
+            st.info(f"Interactive map unavailable ({e}). Showing static map below.")
+
+    tail_risk_img = 'outputs/tail_risk_map.png'
+    if os.path.exists(tail_risk_img):
+        st.image(tail_risk_img, width='stretch')
+    else:
+        st.info('Tail-risk map not generated yet.')
 
 # --- Footer ---
 st.divider()
